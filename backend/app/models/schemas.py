@@ -1,0 +1,85 @@
+from __future__ import annotations
+
+from datetime import datetime
+
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class WatchlistItemInput(BaseModel):
+    symbol: str
+    name: str
+    group: str = "default"
+    sort_index: int = 0
+
+
+class PreferencesInput(BaseModel):
+    locale: str = "zh"
+    notifications_enabled: bool = True
+    quiet_hours: dict = Field(default_factory=dict)
+    risk_profile: str = "neutral"
+
+
+class ClientHelloPayload(BaseModel):
+    client_id: str
+    app_version: str = "0.1.0"
+    locale: str = "zh"
+
+
+class SyncStatePayload(BaseModel):
+    client_id: str
+    watchlist: list[WatchlistItemInput]
+    preferences: PreferencesInput
+
+
+class WsEnvelope(BaseModel):
+    type: str
+    payload: dict
+
+
+class FeedbackInput(BaseModel):
+    client_id: str
+    recommendation_id: int
+    helpful: bool
+    reason: str | None = None
+
+
+class RecommendationDTO(BaseModel):
+    id: int
+    client_id: str
+    symbol: str
+    created_at: datetime
+    action: str
+    target_position_pct: float
+    summary_zh: str
+    summary_en: str
+    risk: dict
+    evidence: dict
+    confidence: float
+    cooldown_key: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class RecommendationListResponse(BaseModel):
+    items: list[RecommendationDTO]
+
+
+class LlmOutput(BaseModel):
+    summary_zh: str
+    summary_en: str
+    action: str
+    target_position_pct: float
+    risk: dict = Field(default_factory=dict)
+    evidence: dict = Field(default_factory=dict)
+    confidence: float = 0.0
+
+
+class CandidateContext(BaseModel):
+    client_id: str
+    symbol: str
+    name: str
+    risk_profile: str
+    locale: str
+    market_features: list[dict]
+    news_items: list[dict]
+    recent_recommendations: list[dict]
