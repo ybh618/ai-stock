@@ -40,6 +40,7 @@ data class SyncPreferences(
 class WsClient(
     private val onRecommendation: suspend (RecommendationDto) -> Unit,
     private val onDebugResult: suspend (String) -> Unit = {},
+    private val onConnectionStateChanged: (WsConnectionState) -> Unit = {},
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val json = Json { ignoreUnknownKeys = true }
@@ -63,6 +64,7 @@ class WsClient(
     ) {
         connectionInfo = ConnectionInfo(baseUrl, clientId, prefs, watchlist, appVersion)
         shouldRun.set(true)
+        onConnectionStateChanged(WsConnectionState(WsConnectionStatus.CONNECTING, "starting"))
         connectNow()
     }
 
@@ -79,6 +81,7 @@ class WsClient(
         reconnectJob = null
         ws?.close(1000, "stopped")
         ws = null
+        onConnectionStateChanged(WsConnectionState(WsConnectionStatus.DISCONNECTED, "stopped"))
     }
 
     private fun connectNow() {
@@ -92,6 +95,7 @@ class WsClient(
                     val current = connectionInfo ?: return
                     webSocket.send(buildHelloMessage(current))
                     webSocket.send(buildSyncStateMessage(current))
+                    onConnectionStateChanged(WsConnectionState(WsConnectionStatus.CONNECTED, "open"))
                 }
 
                 override fun onMessage(webSocket: WebSocket, text: String) {
@@ -110,10 +114,18 @@ class WsClient(
                 }
 
                 override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                    onConnectionStateChanged(WsConnectionState(WsConnectionStatus.RECONNECTING, "closed:$code"))
                     scheduleReconnect()
                 }
 
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                    val code = response?.code ?: -1
+                    onConnectionStateChanged(
+                        WsConnectionState(
+                            WsConnectionStatus.FAILED,
+                            "failure:$code:${t.message.orEmpty()}",
+                        )
+                    )
                     scheduleReconnect()
                 }
             }
@@ -127,7 +139,11 @@ class WsClient(
             var attempt = 0
             while (isActive && shouldRun.get()) {
                 attempt++
+                onConnectionStateChanged(
+                    WsConnectionState(WsConnectionStatus.RECONNECTING, "attempt:$attempt")
+                )
                 delay(minOf(30_000L, attempt * 1_500L))
+                onConnectionStateChanged(WsConnectionState(WsConnectionStatus.CONNECTING, "attempt:$attempt"))
                 connectNow()
                 if (!shouldRun.get()) return@launch
             }

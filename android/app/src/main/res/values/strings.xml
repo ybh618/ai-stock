@@ -36,4 +36,10 @@
     <string name="backend_url">Backend URL</string>
     <string name="save">Save</string>
     <string name="debug_result_title">Debug Result</string>
+    <string name="connection_status">Connection</string>
+    <string name="connection_status_connected">Connected</string>
+    <string name="connection_status_connecting">Connecting</string>
+    <string name="connection_status_reconnecting">Reconnecting</string>
+    <string name="connection_status_failed">Failed</string>
+    <string name="connection_status_disconnected">Disconnected</string>
 </resources>

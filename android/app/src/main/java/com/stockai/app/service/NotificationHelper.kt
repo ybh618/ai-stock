@@ -11,6 +11,8 @@ import androidx.core.app.NotificationCompat
 import com.stockai.app.MainActivity
 import com.stockai.app.R
 import com.stockai.app.network.RecommendationDto
+import com.stockai.app.network.WsConnectionState
+import com.stockai.app.network.WsConnectionStatus
 
 object NotificationHelper {
     const val CHANNEL_ID = "recommendations"
@@ -28,13 +30,24 @@ object NotificationHelper {
         manager.createNotificationChannel(channel)
     }
 
-    fun buildServiceNotification(context: Context): Notification {
+    fun buildServiceNotification(context: Context, state: WsConnectionState? = null): Notification {
+        val statusText = connectionLabel(context, state?.status ?: WsConnectionStatus.DISCONNECTED)
+        val detailText = state?.detail?.takeIf { it.isNotBlank() } ?: statusText
+        val pending = servicePendingIntent(context)
         return NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_notify_sync)
             .setContentTitle(context.getString(R.string.foreground_service_title))
-            .setContentText(context.getString(R.string.foreground_service_content))
+            .setContentText(statusText)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(detailText))
+            .setContentIntent(pending)
             .setOngoing(true)
             .build()
+    }
+
+    fun updateServiceConnectionState(context: Context, state: WsConnectionState) {
+        ensureChannel(context)
+        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        manager.notify(SERVICE_NOTIFICATION_ID, buildServiceNotification(context, state))
     }
 
     fun showRecommendation(context: Context, item: RecommendationDto, useChinese: Boolean) {
@@ -88,5 +101,28 @@ object NotificationHelper {
             .setContentIntent(pending)
             .build()
         manager.notify(DEBUG_NOTIFICATION_ID, notification)
+    }
+
+    private fun servicePendingIntent(context: Context): PendingIntent {
+        val intent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        return PendingIntent.getActivity(
+            context,
+            SERVICE_NOTIFICATION_ID,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+    }
+
+    private fun connectionLabel(context: Context, status: WsConnectionStatus): String {
+        val label = when (status) {
+            WsConnectionStatus.CONNECTED -> context.getString(R.string.connection_status_connected)
+            WsConnectionStatus.CONNECTING -> context.getString(R.string.connection_status_connecting)
+            WsConnectionStatus.RECONNECTING -> context.getString(R.string.connection_status_reconnecting)
+            WsConnectionStatus.FAILED -> context.getString(R.string.connection_status_failed)
+            WsConnectionStatus.DISCONNECTED -> context.getString(R.string.connection_status_disconnected)
+        }
+        return "${context.getString(R.string.connection_status)}: $label"
     }
 }

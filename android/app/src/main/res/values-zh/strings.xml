@@ -36,4 +36,10 @@
     <string name="backend_url">服务端地址</string>
     <string name="save">保存</string>
     <string name="debug_result_title">调试结果</string>
+    <string name="connection_status">连接状态</string>
+    <string name="connection_status_connected">已连接</string>
+    <string name="connection_status_connecting">连接中</string>
+    <string name="connection_status_reconnecting">重连中</string>
+    <string name="connection_status_failed">连接失败</string>
+    <string name="connection_status_disconnected">未连接</string>
 </resources>

@@ -11,15 +11,19 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -48,6 +52,8 @@ import androidx.core.os.LocaleListCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.stockai.app.data.RecommendationEntity
 import com.stockai.app.data.WatchlistEntity
+import com.stockai.app.network.WsConnectionState
+import com.stockai.app.network.WsConnectionStatus
 import com.stockai.app.service.WsForegroundService
 import com.stockai.app.ui.MainViewModel
 
@@ -133,6 +139,7 @@ private fun MainApp(vm: MainViewModel, startRecommendationId: Int?) {
     val watchlist by vm.watchlist.collectAsStateWithLifecycle()
     val recommendations by vm.recommendations.collectAsStateWithLifecycle()
     val prefs by vm.prefs.collectAsStateWithLifecycle()
+    val wsConnectionState by vm.wsConnectionState.collectAsStateWithLifecycle()
     var selectedRecommendationId by rememberSaveable { mutableStateOf(startRecommendationId) }
 
     val selectedRecommendation = recommendations.firstOrNull { it.id == selectedRecommendationId }
@@ -203,6 +210,7 @@ private fun MainApp(vm: MainViewModel, startRecommendationId: Int?) {
                 notificationsEnabled = prefs.notificationsEnabled,
                 riskProfile = prefs.riskProfile,
                 backendBaseUrl = prefs.backendBaseUrl,
+                wsConnectionState = wsConnectionState,
                 quietStartHour = prefs.quietStartHour,
                 quietEndHour = prefs.quietEndHour,
                 onLocale = vm::setLocale,
@@ -349,6 +357,7 @@ private fun SettingsScreen(
     notificationsEnabled: Boolean,
     riskProfile: String,
     backendBaseUrl: String,
+    wsConnectionState: WsConnectionState,
     quietStartHour: Int,
     quietEndHour: Int,
     onLocale: (String) -> Unit,
@@ -368,6 +377,20 @@ private fun SettingsScreen(
         "conservative" -> stringResource(R.string.risk_value_conservative)
         else -> stringResource(R.string.risk_value_neutral)
     }
+    val connectionStatusLabel = when (wsConnectionState.status) {
+        WsConnectionStatus.CONNECTED -> stringResource(R.string.connection_status_connected)
+        WsConnectionStatus.CONNECTING -> stringResource(R.string.connection_status_connecting)
+        WsConnectionStatus.RECONNECTING -> stringResource(R.string.connection_status_reconnecting)
+        WsConnectionStatus.FAILED -> stringResource(R.string.connection_status_failed)
+        WsConnectionStatus.DISCONNECTED -> stringResource(R.string.connection_status_disconnected)
+    }
+    val connectionColor = when (wsConnectionState.status) {
+        WsConnectionStatus.CONNECTED -> androidx.compose.ui.graphics.Color(0xFF2E7D32)
+        WsConnectionStatus.CONNECTING -> androidx.compose.ui.graphics.Color(0xFFF9A825)
+        WsConnectionStatus.RECONNECTING -> androidx.compose.ui.graphics.Color(0xFFF57C00)
+        WsConnectionStatus.FAILED -> androidx.compose.ui.graphics.Color(0xFFC62828)
+        WsConnectionStatus.DISCONNECTED -> androidx.compose.ui.graphics.Color(0xFF757575)
+    }
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -375,6 +398,26 @@ private fun SettingsScreen(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(10.dp)
+                    .background(connectionColor, CircleShape)
+            )
+            Text("${stringResource(R.string.connection_status)}: $connectionStatusLabel")
+        }
+        if (wsConnectionState.detail.isNotBlank()) {
+            Text(
+                text = wsConnectionState.detail,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+
         Text("${stringResource(R.string.locale)}: $localeLabel")
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(onClick = { onLocale("zh") }) { Text(stringResource(R.string.locale_value_zh)) }

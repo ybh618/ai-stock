@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from datetime import UTC, datetime
@@ -21,9 +22,9 @@ class DebugService:
     async def run_checks(self, client_id: str | None = None) -> dict:
         checks = {
             "llm": await self._check_llm_provider(),
-            "market_data": self._check_market_data_provider(),
+            "market_data": await asyncio.to_thread(self._check_market_data_provider),
             "news_data": await self._check_news_provider(),
-            "database": self._check_database(),
+            "database": await asyncio.to_thread(self._check_database),
             "services": await self._check_other_services(),
         }
         ok = all(item.get("ok", False) for item in checks.values())
@@ -101,6 +102,10 @@ class DebugService:
                 "symbol": symbol,
                 "bars_15m_count": len(bars_15m),
                 "bars_daily_count": len(bars_daily),
+                "used_15m_symbol": getattr(self.market_provider, "last_15m_symbol", ""),
+                "used_daily_symbol": getattr(self.market_provider, "last_daily_symbol", ""),
+                "used_5m_fallback_for_15m": getattr(self.market_provider, "last_15m_from_5m", False),
+                "provider_error": getattr(self.market_provider, "last_error", ""),
             }
         except Exception as error:
             return {
@@ -145,12 +150,14 @@ class DebugService:
     async def _check_other_services(self) -> dict:
         try:
             online_clients = await self.ws_manager.online_clients_count()
+            online_ok = online_clients > 0
             return {
-                "ok": True,
+                "ok": online_ok,
                 "message": "服务状态检查完成",
                 "scheduler_enabled": settings.scheduler_enabled,
                 "scan_interval_minutes": settings.scan_interval_minutes,
                 "online_clients": online_clients,
+                "hint": "" if online_ok else "无在线WS客户端，客户端将收不到实时推送/调试通知",
             }
         except Exception as error:
             return {

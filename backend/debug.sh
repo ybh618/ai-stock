@@ -22,6 +22,8 @@ set +a
 SERVER_HOST="${SERVER_HOST:-0.0.0.0}"
 SERVER_PORT="${SERVER_PORT:-3005}"
 LOCAL_BASE_URL="${DEBUG_BASE_URL:-http://127.0.0.1:${SERVER_PORT}}"
+WAIT_CLIENTS_SECONDS="${DEBUG_WAIT_CLIENTS_SECONDS:-30}"
+WAIT_CLIENTS="${DEBUG_WAIT_CLIENTS:-true}"
 
 echo "[debug] 启动服务..."
 "${SCRIPT_DIR}/run_server.sh" &
@@ -45,6 +47,18 @@ done
 if ! curl -fsS "${LOCAL_BASE_URL}/healthz" >/dev/null 2>&1; then
   echo "[debug] 服务未就绪，退出"
   exit 1
+fi
+
+if [[ "${WAIT_CLIENTS}" == "true" ]]; then
+  echo "[debug] 等待客户端连接（最多 ${WAIT_CLIENTS_SECONDS}s）..."
+  for ((i=1; i<=WAIT_CLIENTS_SECONDS; i++)); do
+    STATUS_JSON="$(curl -fsS "${LOCAL_BASE_URL}/v1/debug/status" 2>/dev/null || true)"
+    if [[ -n "${STATUS_JSON}" ]] && [[ "${STATUS_JSON}" != *"\"online_clients\":0"* ]]; then
+      echo "[debug] 检测到在线客户端，开始调试检查"
+      break
+    fi
+    sleep 1
+  done
 fi
 
 DEBUG_URL="${LOCAL_BASE_URL}/v1/debug/run"

@@ -7,6 +7,7 @@ import com.stockai.app.data.AppRepository
 import com.stockai.app.data.PreferenceState
 import com.stockai.app.data.RecommendationEntity
 import com.stockai.app.data.WatchlistEntity
+import com.stockai.app.network.WsConnectionState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -38,6 +39,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     val recommendations: StateFlow<List<RecommendationEntity>> = _recommendations.asStateFlow()
     val watchlist: StateFlow<List<WatchlistEntity>> = _watchlist.asStateFlow()
+    val wsConnectionState: StateFlow<WsConnectionState> = repo.observeWsConnectionState()
 
     init {
         viewModelScope.launch {

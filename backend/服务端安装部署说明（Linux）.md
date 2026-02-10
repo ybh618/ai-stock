@@ -74,8 +74,8 @@ cp .env.example .env
 
 ```bash
 cd /opt/stock-ai/backend
-chmod +x run_server.sh
-./run_server.sh
+chmod +x run.sh
+./run.sh
 ```
 
 验证：
@@ -169,9 +169,10 @@ sudo systemctl reload nginx
 `debug.sh` 会执行以下流程：
 
 1. 启动后端服务（读取 `.env`）
-2. 向 LLM 发送内容为 `test` 的请求
-3. 检查 AkShare 行情接口、资讯抓取接口、数据库、服务状态
-4. 将结果输出到服务器日志，并通过 WebSocket 推送 `server.debug.result` 给客户端
+2. 默认等待客户端连上（可配置等待秒数）
+3. 向 LLM 发送内容为 `test` 的请求
+4. 检查 AkShare 行情接口、资讯抓取接口、数据库、服务状态
+5. 将结果输出到服务器日志，并通过 WebSocket 推送 `server.debug.result` 给客户端
 
 使用方式：
 
@@ -187,6 +188,19 @@ chmod +x run_server.sh debug.sh
 export DEBUG_CLIENT_ID="你的client_id"
 ./debug.sh
 ```
+
+可选：关闭“等待客户端连接”：
+
+```bash
+export DEBUG_WAIT_CLIENTS=false
+./debug.sh
+```
+
+如果你在手机上收不到调试通知，优先检查：
+
+1. 调试结果里的 `services.online_clients` 是否大于 0（必须 > 0 才能 WS 推送到手机）
+2. App 设置里的服务端地址是否可从手机访问（例如 `http://192.168.x.x:3005`，不要填 `127.0.0.1`）
+3. 手机和服务端是否在同一网络，且 3005 端口已放行
 
 ## 11. 一键更新脚本（update.sh）
 

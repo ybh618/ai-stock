@@ -56,3 +56,16 @@ async def run_debug_checks(
     if debug_service is None:
         raise HTTPException(status_code=500, detail="debug service unavailable")
     return await debug_service.run_checks(client_id=client_id)
+
+
+@router.get("/debug/status")
+async def debug_status(request: Request):
+    ws_manager = getattr(request.app.state, "ws_manager", None)
+    if ws_manager is None:
+        raise HTTPException(status_code=500, detail="ws manager unavailable")
+    online_clients = await ws_manager.online_clients_count()
+    return {
+        "online_clients": online_clients,
+        "scheduler_enabled": settings.scheduler_enabled,
+        "scan_interval_minutes": settings.scan_interval_minutes,
+    }

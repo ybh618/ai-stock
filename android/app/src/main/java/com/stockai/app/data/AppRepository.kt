@@ -5,9 +5,14 @@ import com.stockai.app.network.ApiClient
 import com.stockai.app.network.RecommendationDto
 import com.stockai.app.network.SyncPreferences
 import com.stockai.app.network.SyncWatchItem
+import com.stockai.app.network.WsConnectionState
+import com.stockai.app.network.WsConnectionStatus
 import com.stockai.app.network.WsClient
 import com.stockai.app.service.NotificationHelper
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.serialization.json.Json
 import java.time.LocalTime
@@ -20,9 +25,11 @@ class AppRepository private constructor(
     private val dao = database.dao()
     private val apiClient = ApiClient()
     private val json = Json { ignoreUnknownKeys = true }
+    private val _wsConnectionState = MutableStateFlow(WsConnectionState(WsConnectionStatus.DISCONNECTED))
     private var wsClient: WsClient? = null
 
     fun observePreferences(): Flow<PreferenceState> = preferences.state
+    fun observeWsConnectionState(): StateFlow<WsConnectionState> = _wsConnectionState.asStateFlow()
 
     suspend fun ensureClientId(): String = preferences.ensureClientId()
 
@@ -92,7 +99,11 @@ class AppRepository private constructor(
                 },
                 onDebugResult = { summary ->
                     onDebugResult(summary)
-                }
+                },
+                onConnectionStateChanged = { state ->
+                    _wsConnectionState.value = state
+                    NotificationHelper.updateServiceConnectionState(context, state)
+                },
             )
         }
         wsClient?.start(
@@ -106,6 +117,9 @@ class AppRepository private constructor(
 
     fun stopWs() {
         wsClient?.stop()
+        val disconnected = WsConnectionState(WsConnectionStatus.DISCONNECTED, "manual_stop")
+        _wsConnectionState.value = disconnected
+        NotificationHelper.updateServiceConnectionState(context, disconnected)
     }
 
     suspend fun syncRecommendations(limit: Int = 200) {
