@@ -8,6 +8,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 
@@ -64,18 +65,11 @@ class ApiClient {
         clientId: String,
         hours: Int = 24,
         limit: Int = 50,
+        watchlist: List<SyncWatchItem> = emptyList(),
     ): List<NewsItemDto> {
         return withContext(Dispatchers.IO) {
-            val encodedClientId = URLEncoder.encode(clientId, StandardCharsets.UTF_8)
-            val url = buildString {
-                append(baseUrl.trimEnd('/'))
-                append("/v1/news?client_id=")
-                append(encodedClientId)
-                append("&hours=")
-                append(hours)
-                append("&limit=")
-                append(limit)
-            }
+            val url = buildNewsUrl(baseUrl, clientId, hours, limit, watchlist)
+                ?: return@withContext emptyList()
             val request = Request.Builder().url(url).get().build()
             runCatching {
                 client.newCall(request).execute().use { response ->
@@ -105,6 +99,28 @@ class ApiClient {
                 }
             }.getOrDefault(false)
         }
+    }
+
+    private fun buildNewsUrl(
+        baseUrl: String,
+        clientId: String,
+        hours: Int,
+        limit: Int,
+        watchlist: List<SyncWatchItem>,
+    ): String? {
+        val base = "${baseUrl.trimEnd('/')}/v1/news".toHttpUrlOrNull() ?: return null
+        return base.newBuilder()
+            .addQueryParameter("client_id", clientId)
+            .addQueryParameter("hours", hours.toString())
+            .addQueryParameter("limit", limit.toString())
+            .apply {
+                watchlist.forEach { item ->
+                    addQueryParameter("symbols", item.symbol)
+                    addQueryParameter("names", item.name)
+                }
+            }
+            .build()
+            .toString()
     }
 
     @kotlinx.serialization.Serializable

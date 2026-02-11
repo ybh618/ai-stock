@@ -122,7 +122,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _newsLoading.value = true
             val recentItems = repo.fetchLatestNews(hours = 24)
             val items = if (recentItems.isEmpty()) {
-                repo.fetchLatestNews(hours = 24 * 7)
+                repo.fetchLatestNews(hours = 24 * 30)
             } else {
                 recentItems
             }

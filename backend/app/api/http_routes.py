@@ -38,16 +38,32 @@ async def list_latest_news(
     hours: int = Query(24, ge=1, le=168),
     per_symbol_limit: int = Query(5, ge=1, le=20),
     limit: int = Query(50, ge=1, le=200),
+    symbols: list[str] = Query([]),
+    names: list[str] = Query([]),
 ):
     news_provider = getattr(request.app.state, "news_provider", None)
     if news_provider is None:
         raise HTTPException(status_code=500, detail="news provider unavailable")
     with get_db() as db:
         watchlist = get_watchlist(db, client_id)
+    if not watchlist and symbols:
+        fallback_names = names + [""] * max(0, len(symbols) - len(names))
+        watchlist = [
+            {"symbol": symbol.strip(), "name": fallback_names[idx].strip()}
+            for idx, symbol in enumerate(symbols)
+            if symbol and symbol.strip()
+        ]
     if not watchlist:
         return NewsListResponse(items=[])
 
-    tasks = [news_provider.get_recent_news(item.symbol, item.name, hours=hours) for item in watchlist]
+    tasks = [
+        news_provider.get_recent_news(
+            item.symbol if hasattr(item, "symbol") else item.get("symbol", ""),
+            item.name if hasattr(item, "name") else item.get("name", ""),
+            hours=hours,
+        )
+        for item in watchlist
+    ]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     merged: list[dict] = []
@@ -62,11 +78,15 @@ async def list_latest_news(
             seen.add(key)
             merged.append(item)
     merged.sort(key=lambda x: str(x.get("published_at", "")), reverse=True)
-    return NewsListResponse(items=[NewsItemDTO.model_validate(item) for item in merged[:limit]])
+    return NewsListResponse(
+        items=[NewsItemDTO.model_validate(item) for item in merged[:limit]]
+    )
 
 
 @router.post("/recommendations/trigger", response_model=RecommendationTriggerResponse)
-async def trigger_recommendations(request: Request, payload: RecommendationTriggerInput):
+async def trigger_recommendations(
+    request: Request, payload: RecommendationTriggerInput
+):
     rec_engine = getattr(request.app.state, "rec_engine", None)
     if rec_engine is None:
         raise HTTPException(status_code=500, detail="recommendation engine unavailable")

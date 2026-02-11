@@ -161,11 +161,13 @@ class AppRepository private constructor(
     suspend fun fetchLatestNews(hours: Int = 24, limit: Int = 50): List<NewsItemDto> {
         val state = preferences.state.first()
         if (state.clientId.isBlank()) return emptyList()
+        val watchlist = loadWatchlistForSync(state.clientId)
         return apiClient.fetchLatestNews(
             baseUrl = state.backendBaseUrl,
             clientId = state.clientId,
             hours = hours,
             limit = limit,
+            watchlist = watchlist,
         )
     }
 
