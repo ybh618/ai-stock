@@ -18,6 +18,7 @@ from app.models.schemas import (
 )
 
 router = APIRouter(prefix="/v1", tags=["api"])
+NEWS_MAX_HOURS = 24 * 30
 
 
 @router.get("/recommendations", response_model=RecommendationListResponse)
@@ -35,7 +36,7 @@ def list_recommendations(
 async def list_latest_news(
     request: Request,
     client_id: str = Query(...),
-    hours: int = Query(24, ge=1, le=168),
+    hours: int = Query(24, ge=1, le=NEWS_MAX_HOURS),
     per_symbol_limit: int = Query(5, ge=1, le=20),
     limit: int = Query(50, ge=1, le=200),
     symbols: list[str] = Query([]),
