@@ -21,6 +21,7 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 
 data class SyncWatchItem(
     val symbol: String,
@@ -53,7 +54,10 @@ class WsClient(
     @Volatile
     private var connectionInfo: ConnectionInfo? = null
     private val shouldRun = AtomicBoolean(false)
+    private val reconnectAttempts = AtomicInteger(0)
+    private val connectionSerial = AtomicInteger(0)
     private var reconnectJob: Job? = null
+    private var heartbeatJob: Job? = null
 
     fun start(
         baseUrl: String,
@@ -64,8 +68,10 @@ class WsClient(
     ) {
         connectionInfo = ConnectionInfo(baseUrl, clientId, prefs, watchlist, appVersion)
         shouldRun.set(true)
-        onConnectionStateChanged(WsConnectionState(WsConnectionStatus.CONNECTING, "starting"))
-        connectNow()
+        reconnectAttempts.set(0)
+        reconnectJob?.cancel()
+        reconnectJob = null
+        connectNow(detail = "starting")
     }
 
     fun updateSyncState(prefs: SyncPreferences, watchlist: List<SyncWatchItem>) {
@@ -77,24 +83,40 @@ class WsClient(
 
     fun stop() {
         shouldRun.set(false)
+        reconnectAttempts.set(0)
+        connectionSerial.incrementAndGet()
         reconnectJob?.cancel()
         reconnectJob = null
+        stopHeartbeat()
         ws?.close(1000, "stopped")
         ws = null
         onConnectionStateChanged(WsConnectionState(WsConnectionStatus.DISCONNECTED, "stopped"))
     }
 
-    private fun connectNow() {
+    private fun connectNow(detail: String = "connect") {
+        if (!shouldRun.get()) return
         val info = connectionInfo ?: return
+        val serial = connectionSerial.incrementAndGet()
+        stopHeartbeat()
+        ws?.cancel()
+        onConnectionStateChanged(WsConnectionState(WsConnectionStatus.CONNECTING, detail))
         val wsUrl = info.baseUrl.trimEnd('/').replace("http://", "ws://").replace("https://", "wss://") + "/ws"
         val request = Request.Builder().url(wsUrl).build()
         ws = client.newWebSocket(
             request,
             object : WebSocketListener() {
                 override fun onOpen(webSocket: WebSocket, response: Response) {
+                    if (serial != connectionSerial.get() || !shouldRun.get()) {
+                        webSocket.close(1000, "stale_socket")
+                        return
+                    }
                     val current = connectionInfo ?: return
+                    reconnectAttempts.set(0)
+                    reconnectJob?.cancel()
+                    reconnectJob = null
                     webSocket.send(buildHelloMessage(current))
                     webSocket.send(buildSyncStateMessage(current))
+                    startHeartbeat(webSocket, serial)
                     onConnectionStateChanged(WsConnectionState(WsConnectionStatus.CONNECTED, "open"))
                 }
 
@@ -108,46 +130,75 @@ class WsClient(
                             } else if (envelope.type == "server.debug.result") {
                                 val payload = json.decodeFromJsonElement<DebugResultPayload>(envelope.payload)
                                 onDebugResult(payload.summary)
+                            } else if (envelope.type == "pong") {
+                                return@runCatching
                             }
                         }
                     }
                 }
 
                 override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                    onConnectionStateChanged(WsConnectionState(WsConnectionStatus.RECONNECTING, "closed:$code"))
-                    scheduleReconnect()
+                    handleSocketDropped(serial, "closed:$code")
                 }
 
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                     val code = response?.code ?: -1
-                    onConnectionStateChanged(
-                        WsConnectionState(
-                            WsConnectionStatus.FAILED,
-                            "failure:$code:${t.message.orEmpty()}",
-                        )
-                    )
-                    scheduleReconnect()
+                    handleSocketDropped(serial, "failure:$code:${t.message.orEmpty()}", failed = true)
                 }
             }
         )
+    }
+
+    private fun handleSocketDropped(serial: Int, detail: String, failed: Boolean = false) {
+        if (serial != connectionSerial.get()) return
+        stopHeartbeat()
+        ws = null
+        if (!shouldRun.get()) return
+        onConnectionStateChanged(
+            WsConnectionState(
+                if (failed) WsConnectionStatus.FAILED else WsConnectionStatus.RECONNECTING,
+                detail,
+            )
+        )
+        scheduleReconnect()
     }
 
     private fun scheduleReconnect() {
         if (!shouldRun.get()) return
         if (reconnectJob?.isActive == true) return
         reconnectJob = scope.launch {
-            var attempt = 0
-            while (isActive && shouldRun.get()) {
-                attempt++
-                onConnectionStateChanged(
-                    WsConnectionState(WsConnectionStatus.RECONNECTING, "attempt:$attempt")
-                )
-                delay(minOf(30_000L, attempt * 1_500L))
-                onConnectionStateChanged(WsConnectionState(WsConnectionStatus.CONNECTING, "attempt:$attempt"))
-                connectNow()
-                if (!shouldRun.get()) return@launch
+            val attempt = reconnectAttempts.incrementAndGet()
+            onConnectionStateChanged(
+                WsConnectionState(WsConnectionStatus.RECONNECTING, "attempt:$attempt")
+            )
+            delay(minOf(30_000L, attempt * 1_500L))
+            if (!isActive || !shouldRun.get()) {
+                reconnectJob = null
+                return@launch
+            }
+            reconnectJob = null
+            connectNow(detail = "attempt:$attempt")
+        }
+    }
+
+    private fun startHeartbeat(webSocket: WebSocket, serial: Int) {
+        stopHeartbeat()
+        heartbeatJob = scope.launch {
+            while (isActive && shouldRun.get() && serial == connectionSerial.get()) {
+                delay(25_000L)
+                if (!isActive || !shouldRun.get() || serial != connectionSerial.get()) return@launch
+                val sent = runCatching { webSocket.send(buildPingMessage()) }.getOrDefault(false)
+                if (!sent) {
+                    webSocket.cancel()
+                    return@launch
+                }
             }
         }
+    }
+
+    private fun stopHeartbeat() {
+        heartbeatJob?.cancel()
+        heartbeatJob = null
     }
 
     private fun buildHelloMessage(info: ConnectionInfo): String {
@@ -192,6 +243,12 @@ class WsClient(
                     }
                 }
             )
+        )
+    }
+
+    private fun buildPingMessage(): String {
+        return json.encodeToString(
+            WsEnvelope(type = "ping")
         )
     }
 
