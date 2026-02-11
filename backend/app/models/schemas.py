@@ -86,6 +86,24 @@ class RecommendationTriggerInput(BaseModel):
 class RecommendationTriggerResponse(BaseModel):
     ok: bool = True
     client_id: str
+    state: str = "started"
+    message: str = ""
+
+
+class RecommendationStatusResponse(BaseModel):
+    client_id: str
+    state: str = "idle"
+    step: str = "idle"
+    progress: int = 0
+    message: str = ""
+    total_watchlist: int = 0
+    total_candidates: int = 0
+    processed_candidates: int = 0
+    created_recommendations: int = 0
+    started_at: str | None = None
+    updated_at: str | None = None
+    finished_at: str | None = None
+    error: str | None = None
 
 
 class LlmOutput(BaseModel):

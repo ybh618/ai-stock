@@ -8,7 +8,10 @@ import com.stockai.app.data.PreferenceState
 import com.stockai.app.data.RecommendationEntity
 import com.stockai.app.data.WatchlistEntity
 import com.stockai.app.network.NewsItemDto
+import com.stockai.app.network.RecommendationStatusDto
 import com.stockai.app.network.WsConnectionState
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -42,6 +45,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _news = MutableStateFlow<List<NewsItemDto>>(emptyList())
     private val _newsLoading = MutableStateFlow(false)
     private val _newsActionMessage = MutableStateFlow("")
+    private var aiStatusJob: Job? = null
 
     val recommendations: StateFlow<List<RecommendationEntity>> = _recommendations.asStateFlow()
     val watchlist: StateFlow<List<WatchlistEntity>> = _watchlist.asStateFlow()
@@ -139,10 +143,57 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun triggerAiStockRecommendation() {
         viewModelScope.launch {
             _newsLoading.value = true
-            val ok = repo.triggerAiRecommendation()
+            val trigger = repo.triggerAiRecommendation()
             _newsLoading.value = false
-            _newsActionMessage.value = if (ok) "ai_trigger_ok" else "ai_trigger_failed"
+            if (!trigger.ok) {
+                _newsActionMessage.value = "ai_trigger_failed"
+                return@launch
+            }
+            val initialMessage = trigger.message.ifBlank {
+                if (trigger.state == "already_running") {
+                    "AI task is already running."
+                } else {
+                    "AI task started."
+                }
+            }
+            _newsActionMessage.value = initialMessage
+            startAiStatusPolling()
         }
+    }
+
+    private fun startAiStatusPolling() {
+        aiStatusJob?.cancel()
+        aiStatusJob = viewModelScope.launch {
+            repeat(120) {
+                val status = repo.fetchAiRecommendationStatus()
+                if (status != null) {
+                    _newsActionMessage.value = buildAiStatusMessage(status)
+                    when (status.state) {
+                        "succeeded" -> {
+                            repo.syncRecommendations()
+                            return@launch
+                        }
+                        "failed" -> return@launch
+                    }
+                }
+                delay(1_500)
+            }
+            _newsActionMessage.value = "AI status polling timed out. Please retry."
+        }
+    }
+
+    private fun buildAiStatusMessage(status: RecommendationStatusDto): String {
+        val detail = when (status.state) {
+            "running" -> {
+                val progressText = if (status.progress > 0) "${status.progress}%" else ""
+                val suffix = if (progressText.isBlank()) "" else " ($progressText)"
+                "${status.message}$suffix"
+            }
+            "succeeded" -> status.message.ifBlank { "AI selection completed." }
+            "failed" -> status.error?.let { "AI selection failed: $it" } ?: "AI selection failed."
+            else -> status.message.ifBlank { "AI selection is idle." }
+        }
+        return detail.ifBlank { "AI selection is running." }
     }
 
     fun clearNewsActionMessage() {

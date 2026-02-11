@@ -57,10 +57,29 @@ data class NewsListResponse(
 data class TriggerRecommendationResponse(
     val ok: Boolean = false,
     @SerialName("client_id") val clientId: String = "",
+    val state: String = "",
+    val message: String = "",
 )
 
 @Serializable
 data class DebugResultPayload(
     val summary: String,
     val result: JsonElement,
+)
+
+@Serializable
+data class RecommendationStatusDto(
+    @SerialName("client_id") val clientId: String = "",
+    val state: String = "idle",
+    val step: String = "idle",
+    val progress: Int = 0,
+    val message: String = "",
+    @SerialName("total_watchlist") val totalWatchlist: Int = 0,
+    @SerialName("total_candidates") val totalCandidates: Int = 0,
+    @SerialName("processed_candidates") val processedCandidates: Int = 0,
+    @SerialName("created_recommendations") val createdRecommendations: Int = 0,
+    @SerialName("started_at") val startedAt: String? = null,
+    @SerialName("updated_at") val updatedAt: String? = null,
+    @SerialName("finished_at") val finishedAt: String? = null,
+    val error: String? = null,
 )

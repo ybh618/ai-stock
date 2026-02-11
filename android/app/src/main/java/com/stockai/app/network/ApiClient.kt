@@ -83,7 +83,10 @@ class ApiClient {
         }
     }
 
-    suspend fun triggerAiRecommendation(baseUrl: String, clientId: String): Boolean {
+    suspend fun triggerAiRecommendation(
+        baseUrl: String,
+        clientId: String,
+    ): TriggerRecommendationResponse {
         return withContext(Dispatchers.IO) {
             val payload = json.encodeToString(TriggerRecommendationRequest(clientId = clientId))
             val request = Request.Builder()
@@ -92,12 +95,31 @@ class ApiClient {
                 .build()
             runCatching {
                 client.newCall(request).execute().use { response ->
-                    if (!response.isSuccessful) return@use false
+                    if (!response.isSuccessful) return@use TriggerRecommendationResponse(ok = false)
                     val body = response.body?.string().orEmpty()
-                    if (body.isBlank()) return@use false
-                    json.decodeFromString<TriggerRecommendationResponse>(body).ok
+                    if (body.isBlank()) return@use TriggerRecommendationResponse(ok = false)
+                    json.decodeFromString<TriggerRecommendationResponse>(body)
                 }
-            }.getOrDefault(false)
+            }.getOrDefault(TriggerRecommendationResponse(ok = false))
+        }
+    }
+
+    suspend fun fetchAiRecommendationStatus(
+        baseUrl: String,
+        clientId: String,
+    ): RecommendationStatusDto? {
+        return withContext(Dispatchers.IO) {
+            val encodedClientId = URLEncoder.encode(clientId, StandardCharsets.UTF_8)
+            val url = "${baseUrl.trimEnd('/')}/v1/recommendations/status?client_id=$encodedClientId"
+            val request = Request.Builder().url(url).get().build()
+            runCatching {
+                client.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) return@use null
+                    val body = response.body?.string().orEmpty()
+                    if (body.isBlank()) return@use null
+                    json.decodeFromString<RecommendationStatusDto>(body)
+                }
+            }.getOrNull()
         }
     }
 

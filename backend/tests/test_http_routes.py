@@ -13,7 +13,9 @@ class _WatchItem:
 
 
 class _StubNewsProvider:
-    async def get_recent_news(self, symbol: str, name: str, hours: int = 24) -> list[dict]:
+    async def get_recent_news(
+        self, symbol: str, name: str, hours: int = 24
+    ) -> list[dict]:
         return [
             {
                 "source": "stub",
@@ -31,9 +33,49 @@ class _StubNewsProvider:
 class _StubRecommendationEngine:
     def __init__(self) -> None:
         self.last_client_id: str | None = None
+        self._status: dict[str, dict] = {}
 
     async def scan_one_client(self, db, client_id: str) -> None:  # noqa: ANN001
         self.last_client_id = client_id
+
+    async def trigger_scan(self, client_id: str) -> tuple[bool, str, str]:
+        self.last_client_id = client_id
+        self._status[client_id] = {
+            "client_id": client_id,
+            "state": "running",
+            "step": "collecting_candidates",
+            "progress": 30,
+            "message": "Collecting market/news data.",
+            "total_watchlist": 5,
+            "total_candidates": 0,
+            "processed_candidates": 0,
+            "created_recommendations": 0,
+            "started_at": "2026-02-11T00:00:00+00:00",
+            "updated_at": "2026-02-11T00:00:10+00:00",
+            "finished_at": None,
+            "error": None,
+        }
+        return True, "started", "AI selection started."
+
+    async def get_scan_status(self, client_id: str) -> dict:
+        return self._status.get(
+            client_id,
+            {
+                "client_id": client_id,
+                "state": "idle",
+                "step": "idle",
+                "progress": 0,
+                "message": "",
+                "total_watchlist": 0,
+                "total_candidates": 0,
+                "processed_candidates": 0,
+                "created_recommendations": 0,
+                "started_at": None,
+                "updated_at": None,
+                "finished_at": None,
+                "error": None,
+            },
+        )
 
 
 def _build_test_app(rec_engine: _StubRecommendationEngine | None = None) -> FastAPI:
@@ -66,7 +108,29 @@ def test_trigger_endpoint_runs_scan_for_client(monkeypatch) -> None:
     rec_engine = _StubRecommendationEngine()
     app = _build_test_app(rec_engine=rec_engine)
     with TestClient(app) as client:
-        response = client.post("/v1/recommendations/trigger", json={"client_id": "client-b"})
+        response = client.post(
+            "/v1/recommendations/trigger", json={"client_id": "client-b"}
+        )
     assert response.status_code == 200
-    assert response.json() == {"ok": True, "client_id": "client-b"}
+    assert response.json() == {
+        "ok": True,
+        "client_id": "client-b",
+        "state": "started",
+        "message": "AI selection started.",
+    }
     assert rec_engine.last_client_id == "client-b"
+
+
+def test_recommendation_status_endpoint_returns_progress() -> None:
+    rec_engine = _StubRecommendationEngine()
+    app = _build_test_app(rec_engine=rec_engine)
+    with TestClient(app) as client:
+        client.post("/v1/recommendations/trigger", json={"client_id": "client-c"})
+        response = client.get(
+            "/v1/recommendations/status", params={"client_id": "client-c"}
+        )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["client_id"] == "client-c"
+    assert payload["state"] == "running"
+    assert payload["step"] == "collecting_candidates"

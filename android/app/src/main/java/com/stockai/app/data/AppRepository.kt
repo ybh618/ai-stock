@@ -3,9 +3,11 @@ package com.stockai.app.data
 import android.content.Context
 import com.stockai.app.network.ApiClient
 import com.stockai.app.network.NewsItemDto
+import com.stockai.app.network.RecommendationStatusDto
 import com.stockai.app.network.RecommendationDto
 import com.stockai.app.network.SyncPreferences
 import com.stockai.app.network.SyncWatchItem
+import com.stockai.app.network.TriggerRecommendationResponse
 import com.stockai.app.network.WsConnectionState
 import com.stockai.app.network.WsConnectionStatus
 import com.stockai.app.network.WsClient
@@ -171,17 +173,22 @@ class AppRepository private constructor(
         )
     }
 
-    suspend fun triggerAiRecommendation(): Boolean {
+    suspend fun triggerAiRecommendation(): TriggerRecommendationResponse {
         val state = preferences.state.first()
-        if (state.clientId.isBlank()) return false
-        val ok = apiClient.triggerAiRecommendation(
+        if (state.clientId.isBlank()) return TriggerRecommendationResponse(ok = false)
+        return apiClient.triggerAiRecommendation(
             baseUrl = state.backendBaseUrl,
             clientId = state.clientId,
         )
-        if (ok) {
-            syncRecommendations()
-        }
-        return ok
+    }
+
+    suspend fun fetchAiRecommendationStatus(): RecommendationStatusDto? {
+        val state = preferences.state.first()
+        if (state.clientId.isBlank()) return null
+        return apiClient.fetchAiRecommendationStatus(
+            baseUrl = state.backendBaseUrl,
+            clientId = state.clientId,
+        )
     }
 
     private suspend fun onRecommendation(item: RecommendationDto) {

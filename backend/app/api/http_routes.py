@@ -13,6 +13,7 @@ from app.models.schemas import (
     NewsItemDTO,
     NewsListResponse,
     RecommendationListResponse,
+    RecommendationStatusResponse,
     RecommendationTriggerInput,
     RecommendationTriggerResponse,
 )
@@ -91,9 +92,25 @@ async def trigger_recommendations(
     rec_engine = getattr(request.app.state, "rec_engine", None)
     if rec_engine is None:
         raise HTTPException(status_code=500, detail="recommendation engine unavailable")
-    with get_db() as db:
-        await rec_engine.scan_one_client(db, payload.client_id)
-    return RecommendationTriggerResponse(client_id=payload.client_id)
+    ok, state, message = await rec_engine.trigger_scan(payload.client_id)
+    return RecommendationTriggerResponse(
+        ok=ok,
+        client_id=payload.client_id,
+        state=state,
+        message=message,
+    )
+
+
+@router.get("/recommendations/status", response_model=RecommendationStatusResponse)
+async def recommendation_status(
+    request: Request,
+    client_id: str = Query(...),
+):
+    rec_engine = getattr(request.app.state, "rec_engine", None)
+    if rec_engine is None:
+        raise HTTPException(status_code=500, detail="recommendation engine unavailable")
+    status = await rec_engine.get_scan_status(client_id)
+    return RecommendationStatusResponse.model_validate(status)
 
 
 @router.post("/feedback")
