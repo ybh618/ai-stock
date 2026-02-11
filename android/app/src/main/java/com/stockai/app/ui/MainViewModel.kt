@@ -172,7 +172,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun discoverNewStocks() {
         viewModelScope.launch {
             _newsLoading.value = true
-            val items = repo.fetchDiscoveredStocks(limit = 6, universeLimit = 100)
+            val items = repo.fetchDiscoveredStocks(limit = 6, universeLimit = 50)
             _newsLoading.value = false
             _discoveries.value = items
             _newsActionMessage.value = if (items.isEmpty()) {

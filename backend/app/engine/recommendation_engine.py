@@ -185,10 +185,15 @@ class RecommendationEngine:
         risk_profile = pref.risk_profile if pref else "neutral"
         locale = pref.locale if pref else "zh"
 
+        capped_universe = max(20, min(universe_limit, 120))
         raw_candidates: list[dict] = []
         try:
-            raw_candidates = self.market_provider.discover_candidates(
-                limit=universe_limit
+            raw_candidates = await asyncio.wait_for(
+                asyncio.to_thread(
+                    self.market_provider.discover_candidates,
+                    capped_universe,
+                ),
+                timeout=12,
             )
         except Exception:
             raw_candidates = []
@@ -199,8 +204,10 @@ class RecommendationEngine:
             ]
         if not raw_candidates:
             return []
+        scan_limit = min(len(raw_candidates), max(limit * 6, 30))
+        raw_candidates = raw_candidates[:scan_limit]
 
-        semaphore = asyncio.Semaphore(6)
+        semaphore = asyncio.Semaphore(4)
         scored_candidates: list[Candidate] = []
         scored_lock = asyncio.Lock()
 
@@ -211,10 +218,17 @@ class RecommendationEngine:
                 return
             async with semaphore:
                 try:
-                    bars_15m = self.market_provider.get_15m_bars(symbol)
-                    bars_daily = self.market_provider.get_daily_bars(symbol)
-                    news = await self.news_provider.get_recent_news(
-                        symbol, name, hours=24
+                    bars_15m = await asyncio.wait_for(
+                        asyncio.to_thread(self.market_provider.get_15m_bars, symbol),
+                        timeout=8,
+                    )
+                    bars_daily = await asyncio.wait_for(
+                        asyncio.to_thread(self.market_provider.get_daily_bars, symbol),
+                        timeout=8,
+                    )
+                    news = await asyncio.wait_for(
+                        self.news_provider.get_recent_news(symbol, name, hours=24),
+                        timeout=10,
                     )
                     market = extract_market_features(symbol, bars_15m, bars_daily)
                     result = prefilter_candidate(
@@ -243,9 +257,16 @@ class RecommendationEngine:
                 except Exception:
                     return
 
-        await asyncio.gather(
-            *[_evaluate(item) for item in raw_candidates], return_exceptions=True
-        )
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(
+                    *[_evaluate(item) for item in raw_candidates],
+                    return_exceptions=True,
+                ),
+                timeout=35,
+            )
+        except Exception:
+            pass
         scored_candidates.sort(key=lambda c: c.score, reverse=True)
         shortlist = scored_candidates[: max(limit * 2, limit)]
         if not shortlist:
