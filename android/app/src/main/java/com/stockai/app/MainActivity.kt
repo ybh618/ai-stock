@@ -551,6 +551,7 @@ private fun newsActionMessageText(raw: String): String? {
     return when {
         raw == "ai_trigger_ok" -> stringResource(R.string.ai_trigger_ok)
         raw == "ai_trigger_failed" -> stringResource(R.string.ai_trigger_failed)
+        raw == "discover_trigger_failed" -> stringResource(R.string.discover_trigger_failed)
         raw == "news_empty" -> stringResource(R.string.news_empty)
         raw == "discover_empty" -> stringResource(R.string.discover_empty)
         raw.startsWith("discover_loaded:") -> {

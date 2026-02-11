@@ -11,6 +11,9 @@ from app.db.repository import create_feedback, get_recommendations, get_watchlis
 from app.models.schemas import (
     DiscoverStockDTO,
     DiscoverStockListResponse,
+    DiscoverStockStatusResponse,
+    DiscoverStockTriggerInput,
+    DiscoverStockTriggerResponse,
     FeedbackInput,
     NewsItemDTO,
     NewsListResponse,
@@ -105,6 +108,39 @@ async def discover_stocks(
     return DiscoverStockListResponse(
         items=[DiscoverStockDTO.model_validate(item) for item in items]
     )
+
+
+@router.post("/discover/stocks/trigger", response_model=DiscoverStockTriggerResponse)
+async def trigger_discover_stocks(
+    request: Request,
+    payload: DiscoverStockTriggerInput,
+):
+    rec_engine = getattr(request.app.state, "rec_engine", None)
+    if rec_engine is None:
+        raise HTTPException(status_code=500, detail="recommendation engine unavailable")
+    ok, state, message = await rec_engine.trigger_discovery(
+        client_id=payload.client_id,
+        limit=payload.limit,
+        universe_limit=payload.universe_limit,
+    )
+    return DiscoverStockTriggerResponse(
+        ok=ok,
+        client_id=payload.client_id,
+        state=state,
+        message=message,
+    )
+
+
+@router.get("/discover/stocks/status", response_model=DiscoverStockStatusResponse)
+async def discover_stocks_status(
+    request: Request,
+    client_id: str = Query(...),
+):
+    rec_engine = getattr(request.app.state, "rec_engine", None)
+    if rec_engine is None:
+        raise HTTPException(status_code=500, detail="recommendation engine unavailable")
+    status = await rec_engine.get_discovery_status(client_id)
+    return DiscoverStockStatusResponse.model_validate(status)
 
 
 @router.post("/recommendations/trigger", response_model=RecommendationTriggerResponse)

@@ -123,6 +123,36 @@ class DiscoverStockListResponse(BaseModel):
     items: list[DiscoverStockDTO]
 
 
+class DiscoverStockTriggerInput(BaseModel):
+    client_id: str
+    limit: int = 6
+    universe_limit: int = 50
+
+
+class DiscoverStockTriggerResponse(BaseModel):
+    ok: bool = True
+    client_id: str
+    state: str = "started"
+    message: str = ""
+
+
+class DiscoverStockStatusResponse(BaseModel):
+    client_id: str
+    state: str = "idle"
+    step: str = "idle"
+    progress: int = 0
+    message: str = ""
+    limit: int = 0
+    universe_limit: int = 0
+    scanned_candidates: int = 0
+    total_candidates: int = 0
+    started_at: str | None = None
+    updated_at: str | None = None
+    finished_at: str | None = None
+    error: str | None = None
+    items: list[DiscoverStockDTO] = Field(default_factory=list)
+
+
 class LlmOutput(BaseModel):
     summary_zh: str
     summary_en: str

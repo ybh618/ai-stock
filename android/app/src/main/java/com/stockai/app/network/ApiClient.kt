@@ -152,6 +152,54 @@ class ApiClient {
         }
     }
 
+    suspend fun triggerDiscoverStocks(
+        baseUrl: String,
+        clientId: String,
+        limit: Int = 6,
+        universeLimit: Int = 50,
+    ): DiscoverStockTriggerResponse {
+        return withContext(Dispatchers.IO) {
+            val payload = json.encodeToString(
+                DiscoverStockTriggerRequest(
+                    clientId = clientId,
+                    limit = limit,
+                    universeLimit = universeLimit,
+                )
+            )
+            val request = Request.Builder()
+                .url("${baseUrl.trimEnd('/')}/v1/discover/stocks/trigger")
+                .post(payload.toRequestBody(jsonMediaType))
+                .build()
+            runCatching {
+                client.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) return@use DiscoverStockTriggerResponse(ok = false)
+                    val body = response.body?.string().orEmpty()
+                    if (body.isBlank()) return@use DiscoverStockTriggerResponse(ok = false)
+                    json.decodeFromString<DiscoverStockTriggerResponse>(body)
+                }
+            }.getOrDefault(DiscoverStockTriggerResponse(ok = false))
+        }
+    }
+
+    suspend fun fetchDiscoverStocksStatus(
+        baseUrl: String,
+        clientId: String,
+    ): DiscoverStockStatusDto? {
+        return withContext(Dispatchers.IO) {
+            val encodedClientId = URLEncoder.encode(clientId, StandardCharsets.UTF_8)
+            val url = "${baseUrl.trimEnd('/')}/v1/discover/stocks/status?client_id=$encodedClientId"
+            val request = Request.Builder().url(url).get().build()
+            runCatching {
+                client.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) return@use null
+                    val body = response.body?.string().orEmpty()
+                    if (body.isBlank()) return@use null
+                    json.decodeFromString<DiscoverStockStatusDto>(body)
+                }
+            }.getOrNull()
+        }
+    }
+
     private fun buildNewsUrl(
         baseUrl: String,
         clientId: String,
@@ -188,5 +236,14 @@ class ApiClient {
     private data class TriggerRecommendationRequest(
         @kotlinx.serialization.SerialName("client_id")
         val clientId: String,
+    )
+
+    @kotlinx.serialization.Serializable
+    private data class DiscoverStockTriggerRequest(
+        @kotlinx.serialization.SerialName("client_id")
+        val clientId: String,
+        val limit: Int,
+        @kotlinx.serialization.SerialName("universe_limit")
+        val universeLimit: Int,
     )
 }

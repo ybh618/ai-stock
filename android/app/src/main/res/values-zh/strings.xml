@@ -59,6 +59,7 @@
     <string name="discover_results_title">新发现股票</string>
     <string name="discover_empty">未发现值得注意的新股票。</string>
     <string name="discover_loaded_count">已发现 %1$s 只值得注意的股票。</string>
+    <string name="discover_trigger_failed">发现新股任务启动失败。</string>
     <string name="news_empty">暂无新闻，点击“获取最新新闻”。</string>
     <string name="news_loaded_count">已加载 %1$s 条新闻。</string>
     <string name="ai_trigger_ok">已触发AI选股，正在等待推送结果。</string>

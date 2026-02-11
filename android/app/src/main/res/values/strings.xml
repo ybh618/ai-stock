@@ -59,6 +59,7 @@
     <string name="discover_results_title">Discovered Stocks</string>
     <string name="discover_empty">No noteworthy stocks found.</string>
     <string name="discover_loaded_count">Discovered %1$s noteworthy stocks.</string>
+    <string name="discover_trigger_failed">Failed to start stock discovery.</string>
     <string name="news_empty">No news yet. Tap \"Fetch Latest News\".</string>
     <string name="news_loaded_count">Loaded %1$s news items.</string>
     <string name="ai_trigger_ok">AI recommendation triggered. Waiting for push updates.</string>

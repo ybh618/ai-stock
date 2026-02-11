@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
+from typing import Awaitable, Callable
 
 from sqlalchemy.orm import Session
 
@@ -50,6 +51,24 @@ class ScanStatus:
     error: str | None = None
 
 
+@dataclass(slots=True)
+class DiscoverStatus:
+    client_id: str
+    state: str = "idle"
+    step: str = "idle"
+    progress: int = 0
+    message: str = ""
+    limit: int = 0
+    universe_limit: int = 0
+    scanned_candidates: int = 0
+    total_candidates: int = 0
+    started_at: str | None = None
+    updated_at: str | None = None
+    finished_at: str | None = None
+    error: str | None = None
+    items: list[dict] = field(default_factory=list)
+
+
 class RecommendationEngine:
     def __init__(
         self,
@@ -65,6 +84,8 @@ class RecommendationEngine:
         self._status_lock = asyncio.Lock()
         self._status_by_client: dict[str, ScanStatus] = {}
         self._manual_tasks: dict[str, asyncio.Task] = {}
+        self._discover_status_by_client: dict[str, DiscoverStatus] = {}
+        self._discover_tasks: dict[str, asyncio.Task] = {}
 
     async def trigger_scan(self, client_id: str) -> tuple[bool, str, str]:
         async with self._status_lock:
@@ -84,6 +105,37 @@ class RecommendationEngine:
                 return asdict(ScanStatus(client_id=client_id))
             return asdict(status)
 
+    async def trigger_discovery(
+        self,
+        client_id: str,
+        limit: int = 6,
+        universe_limit: int = 50,
+    ) -> tuple[bool, str, str]:
+        normalized_limit = max(1, min(limit, 20))
+        normalized_universe = max(20, min(universe_limit, 300))
+        async with self._status_lock:
+            existing = self._discover_tasks.get(client_id)
+            if existing and not existing.done():
+                current = self._discover_status_by_client.get(client_id)
+                message = current.message if current else "Discovery task is running."
+                return True, "already_running", message
+            task = asyncio.create_task(
+                self._run_discovery_task(
+                    client_id=client_id,
+                    limit=normalized_limit,
+                    universe_limit=normalized_universe,
+                )
+            )
+            self._discover_tasks[client_id] = task
+        return True, "started", "Discovery task started."
+
+    async def get_discovery_status(self, client_id: str) -> dict:
+        async with self._status_lock:
+            status = self._discover_status_by_client.get(client_id)
+            if status is None:
+                return asdict(DiscoverStatus(client_id=client_id))
+            return asdict(status)
+
     async def _run_manual_scan(self, client_id: str) -> None:
         try:
             with get_db() as db:
@@ -97,6 +149,59 @@ class RecommendationEngine:
                 current = self._manual_tasks.get(client_id)
                 if current is asyncio.current_task():
                     self._manual_tasks.pop(client_id, None)
+
+    async def _run_discovery_task(
+        self,
+        client_id: str,
+        limit: int,
+        universe_limit: int,
+    ) -> None:
+        try:
+            await self._set_discovery_running_status(
+                client_id,
+                step="preparing",
+                progress=5,
+                message="Preparing discovery task.",
+                limit=limit,
+                universe_limit=universe_limit,
+                scanned_candidates=0,
+                total_candidates=0,
+            )
+            items = await self.discover_stocks(
+                client_id=client_id,
+                limit=limit,
+                universe_limit=universe_limit,
+                progress_hook=lambda **kwargs: self._set_discovery_running_status(
+                    client_id,
+                    limit=limit,
+                    universe_limit=universe_limit,
+                    **kwargs,
+                ),
+            )
+            await self._set_discovery_succeeded_status(
+                client_id=client_id,
+                message=(
+                    f"Discovery completed. found={len(items)}."
+                    if items
+                    else "Discovery completed. no stocks found."
+                ),
+                items=items,
+                limit=limit,
+                universe_limit=universe_limit,
+            )
+        except Exception as exc:
+            await self._set_discovery_failed_status(
+                client_id=client_id,
+                message="Discovery task failed.",
+                error=str(exc),
+                limit=limit,
+                universe_limit=universe_limit,
+            )
+        finally:
+            async with self._status_lock:
+                current = self._discover_tasks.get(client_id)
+                if current is asyncio.current_task():
+                    self._discover_tasks.pop(client_id, None)
 
     def _now_iso(self) -> str:
         return datetime.now(timezone.utc).isoformat()
@@ -173,11 +278,105 @@ class RecommendationEngine:
             status.error = error
             self._status_by_client[client_id] = status
 
+    async def _set_discovery_running_status(
+        self,
+        client_id: str,
+        *,
+        step: str,
+        progress: int,
+        message: str,
+        limit: int | None = None,
+        universe_limit: int | None = None,
+        scanned_candidates: int | None = None,
+        total_candidates: int | None = None,
+    ) -> None:
+        async with self._status_lock:
+            now = self._now_iso()
+            status = self._discover_status_by_client.get(client_id) or DiscoverStatus(
+                client_id=client_id
+            )
+            if status.started_at is None:
+                status.started_at = now
+            status.state = "running"
+            status.step = step
+            status.progress = max(0, min(99, progress))
+            status.message = message
+            status.updated_at = now
+            status.finished_at = None
+            status.error = None
+            if limit is not None:
+                status.limit = limit
+            if universe_limit is not None:
+                status.universe_limit = universe_limit
+            if scanned_candidates is not None:
+                status.scanned_candidates = scanned_candidates
+            if total_candidates is not None:
+                status.total_candidates = total_candidates
+            self._discover_status_by_client[client_id] = status
+
+    async def _set_discovery_succeeded_status(
+        self,
+        client_id: str,
+        message: str,
+        items: list[dict],
+        limit: int,
+        universe_limit: int,
+    ) -> None:
+        async with self._status_lock:
+            now = self._now_iso()
+            status = self._discover_status_by_client.get(client_id) or DiscoverStatus(
+                client_id=client_id
+            )
+            if status.started_at is None:
+                status.started_at = now
+            status.state = "succeeded"
+            status.step = "done"
+            status.progress = 100
+            status.message = message
+            status.updated_at = now
+            status.finished_at = now
+            status.error = None
+            status.items = items
+            status.limit = limit
+            status.universe_limit = universe_limit
+            status.scanned_candidates = max(
+                status.scanned_candidates, status.total_candidates
+            )
+            self._discover_status_by_client[client_id] = status
+
+    async def _set_discovery_failed_status(
+        self,
+        client_id: str,
+        message: str,
+        error: str,
+        limit: int,
+        universe_limit: int,
+    ) -> None:
+        async with self._status_lock:
+            now = self._now_iso()
+            status = self._discover_status_by_client.get(client_id) or DiscoverStatus(
+                client_id=client_id
+            )
+            if status.started_at is None:
+                status.started_at = now
+            status.state = "failed"
+            status.step = "failed"
+            status.progress = 100
+            status.message = message
+            status.updated_at = now
+            status.finished_at = now
+            status.error = error
+            status.limit = limit
+            status.universe_limit = universe_limit
+            status.items = []
+            self._discover_status_by_client[client_id] = status
+
     async def discover_stocks(
         self,
         client_id: str,
         limit: int = 5,
         universe_limit: int = 80,
+        progress_hook: Callable[..., Awaitable[None]] | None = None,
     ) -> list[dict]:
         with get_db() as db:
             pref = repository.get_preferences(db, client_id)
@@ -186,6 +385,14 @@ class RecommendationEngine:
         locale = pref.locale if pref else "zh"
 
         capped_universe = max(20, min(universe_limit, 120))
+        if progress_hook is not None:
+            await progress_hook(
+                step="loading_universe",
+                progress=10,
+                message=f"Loading candidate universe (limit={capped_universe}).",
+                scanned_candidates=0,
+                total_candidates=0,
+            )
         raw_candidates: list[dict] = []
         try:
             raw_candidates = await asyncio.wait_for(
@@ -206,12 +413,23 @@ class RecommendationEngine:
             return []
         scan_limit = min(len(raw_candidates), max(limit * 6, 30))
         raw_candidates = raw_candidates[:scan_limit]
+        if progress_hook is not None:
+            await progress_hook(
+                step="collecting_candidates",
+                progress=20,
+                message=f"Collecting market/news data (0/{scan_limit}).",
+                scanned_candidates=0,
+                total_candidates=scan_limit,
+            )
 
         semaphore = asyncio.Semaphore(4)
         scored_candidates: list[Candidate] = []
         scored_lock = asyncio.Lock()
+        processed_candidates = 0
+        progress_lock = asyncio.Lock()
 
         async def _evaluate(item: dict) -> None:
+            nonlocal processed_candidates
             symbol = str(item.get("symbol") or "").strip()
             name = str(item.get("name") or "").strip() or symbol
             if not symbol:
@@ -256,6 +474,23 @@ class RecommendationEngine:
                         )
                 except Exception:
                     return
+                finally:
+                    if progress_hook is not None:
+                        async with progress_lock:
+                            processed_candidates += 1
+                            progress = 20 + int(
+                                (processed_candidates / max(1, scan_limit)) * 50
+                            )
+                            await progress_hook(
+                                step="collecting_candidates",
+                                progress=progress,
+                                message=(
+                                    f"Collecting market/news data "
+                                    f"({processed_candidates}/{scan_limit})."
+                                ),
+                                scanned_candidates=processed_candidates,
+                                total_candidates=scan_limit,
+                            )
 
         try:
             await asyncio.wait_for(
@@ -271,9 +506,17 @@ class RecommendationEngine:
         shortlist = scored_candidates[: max(limit * 2, limit)]
         if not shortlist:
             return []
+        if progress_hook is not None:
+            await progress_hook(
+                step="llm_reasoning",
+                progress=72,
+                message=f"Running AI reasoning (0/{len(shortlist)}).",
+                scanned_candidates=scan_limit,
+                total_candidates=scan_limit,
+            )
 
         output: list[dict] = []
-        for candidate in shortlist:
+        for idx, candidate in enumerate(shortlist, start=1):
             try:
                 context = CandidateContext(
                     client_id=client_id,
@@ -311,8 +554,25 @@ class RecommendationEngine:
                 )
             except Exception:
                 continue
+            if progress_hook is not None:
+                progress = 72 + int((idx / max(1, len(shortlist))) * 24)
+                await progress_hook(
+                    step="llm_reasoning",
+                    progress=progress,
+                    message=f"Running AI reasoning ({idx}/{len(shortlist)}).",
+                    scanned_candidates=scan_limit,
+                    total_candidates=scan_limit,
+                )
             if len(output) >= limit:
                 break
+        if progress_hook is not None:
+            await progress_hook(
+                step="finalizing",
+                progress=98,
+                message=f"Finalizing discovery results ({len(output)}).",
+                scanned_candidates=scan_limit,
+                total_candidates=scan_limit,
+            )
         return output
 
     async def scan_all_clients(self, db: Session) -> None:

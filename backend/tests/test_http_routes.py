@@ -34,6 +34,7 @@ class _StubRecommendationEngine:
     def __init__(self) -> None:
         self.last_client_id: str | None = None
         self._status: dict[str, dict] = {}
+        self._discover_status: dict[str, dict] = {}
 
     async def scan_one_client(self, db, client_id: str) -> None:  # noqa: ANN001
         self.last_client_id = client_id
@@ -98,6 +99,52 @@ class _StubRecommendationEngine:
                 "target_position_pct": 15.0,
             }
         ]
+
+    async def trigger_discovery(
+        self,
+        client_id: str,
+        limit: int = 6,
+        universe_limit: int = 50,
+    ) -> tuple[bool, str, str]:
+        self.last_client_id = client_id
+        self._discover_status[client_id] = {
+            "client_id": client_id,
+            "state": "running",
+            "step": "collecting_candidates",
+            "progress": 35,
+            "message": "Collecting market/news data (12/40).",
+            "limit": limit,
+            "universe_limit": universe_limit,
+            "scanned_candidates": 12,
+            "total_candidates": 40,
+            "started_at": "2026-02-11T00:00:00+00:00",
+            "updated_at": "2026-02-11T00:00:10+00:00",
+            "finished_at": None,
+            "error": None,
+            "items": [],
+        }
+        return True, "started", "Discovery task started."
+
+    async def get_discovery_status(self, client_id: str) -> dict:
+        return self._discover_status.get(
+            client_id,
+            {
+                "client_id": client_id,
+                "state": "idle",
+                "step": "idle",
+                "progress": 0,
+                "message": "",
+                "limit": 0,
+                "universe_limit": 0,
+                "scanned_candidates": 0,
+                "total_candidates": 0,
+                "started_at": None,
+                "updated_at": None,
+                "finished_at": None,
+                "error": None,
+                "items": [],
+            },
+        )
 
 
 def _build_test_app(rec_engine: _StubRecommendationEngine | None = None) -> FastAPI:
@@ -170,3 +217,29 @@ def test_discover_stocks_endpoint_returns_items() -> None:
     payload = response.json()
     assert len(payload["items"]) == 1
     assert payload["items"][0]["symbol"] == "600519"
+
+
+def test_discover_trigger_and_status_endpoints() -> None:
+    rec_engine = _StubRecommendationEngine()
+    app = _build_test_app(rec_engine=rec_engine)
+    with TestClient(app) as client:
+        trigger_response = client.post(
+            "/v1/discover/stocks/trigger",
+            json={"client_id": "client-e", "limit": 4, "universe_limit": 60},
+        )
+        status_response = client.get(
+            "/v1/discover/stocks/status",
+            params={"client_id": "client-e"},
+        )
+    assert trigger_response.status_code == 200
+    assert trigger_response.json() == {
+        "ok": True,
+        "client_id": "client-e",
+        "state": "started",
+        "message": "Discovery task started.",
+    }
+    assert status_response.status_code == 200
+    payload = status_response.json()
+    assert payload["client_id"] == "client-e"
+    assert payload["state"] == "running"
+    assert payload["progress"] == 35

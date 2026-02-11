@@ -3,6 +3,8 @@ package com.stockai.app.data
 import android.content.Context
 import com.stockai.app.network.ApiClient
 import com.stockai.app.network.DiscoverStockDto
+import com.stockai.app.network.DiscoverStockStatusDto
+import com.stockai.app.network.DiscoverStockTriggerResponse
 import com.stockai.app.network.NewsItemDto
 import com.stockai.app.network.RecommendationStatusDto
 import com.stockai.app.network.RecommendationDto
@@ -204,6 +206,26 @@ class AppRepository private constructor(
             clientId = state.clientId,
             limit = limit,
             universeLimit = universeLimit,
+        )
+    }
+
+    suspend fun triggerDiscoverStocks(limit: Int = 6, universeLimit: Int = 50): DiscoverStockTriggerResponse {
+        val state = preferences.state.first()
+        if (state.clientId.isBlank()) return DiscoverStockTriggerResponse(ok = false)
+        return apiClient.triggerDiscoverStocks(
+            baseUrl = state.backendBaseUrl,
+            clientId = state.clientId,
+            limit = limit,
+            universeLimit = universeLimit,
+        )
+    }
+
+    suspend fun fetchDiscoverStocksStatus(): DiscoverStockStatusDto? {
+        val state = preferences.state.first()
+        if (state.clientId.isBlank()) return null
+        return apiClient.fetchDiscoverStocksStatus(
+            baseUrl = state.backendBaseUrl,
+            clientId = state.clientId,
         )
     }
 

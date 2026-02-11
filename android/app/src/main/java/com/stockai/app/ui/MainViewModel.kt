@@ -8,6 +8,7 @@ import com.stockai.app.data.PreferenceState
 import com.stockai.app.data.RecommendationEntity
 import com.stockai.app.data.WatchlistEntity
 import com.stockai.app.network.DiscoverStockDto
+import com.stockai.app.network.DiscoverStockStatusDto
 import com.stockai.app.network.NewsItemDto
 import com.stockai.app.network.RecommendationStatusDto
 import com.stockai.app.network.WsConnectionState
@@ -49,6 +50,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _newsLoading = MutableStateFlow(false)
     private val _newsActionMessage = MutableStateFlow("")
     private var aiStatusJob: Job? = null
+    private var discoverStatusJob: Job? = null
 
     val recommendations: StateFlow<List<RecommendationEntity>> = _recommendations.asStateFlow()
     val watchlist: StateFlow<List<WatchlistEntity>> = _watchlist.asStateFlow()
@@ -172,15 +174,71 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun discoverNewStocks() {
         viewModelScope.launch {
             _newsLoading.value = true
-            val items = repo.fetchDiscoveredStocks(limit = 6, universeLimit = 50)
-            _newsLoading.value = false
-            _discoveries.value = items
-            _newsActionMessage.value = if (items.isEmpty()) {
-                "discover_empty"
-            } else {
-                "discover_loaded:${items.size}"
+            val trigger = repo.triggerDiscoverStocks(limit = 6, universeLimit = 50)
+            if (!trigger.ok) {
+                _newsLoading.value = false
+                _newsActionMessage.value = "discover_trigger_failed"
+                return@launch
             }
+            _newsActionMessage.value = trigger.message.ifBlank {
+                if (trigger.state == "already_running") {
+                    "Discovery task is already running."
+                } else {
+                    "Discovery task started."
+                }
+            }
+            startDiscoverStatusPolling()
         }
+    }
+
+    private fun startDiscoverStatusPolling() {
+        discoverStatusJob?.cancel()
+        discoverStatusJob = viewModelScope.launch {
+            repeat(120) {
+                val status = repo.fetchDiscoverStocksStatus()
+                if (status != null) {
+                    _newsActionMessage.value = buildDiscoverStatusMessage(status)
+                    when (status.state) {
+                        "succeeded" -> {
+                            _discoveries.value = status.items
+                            _newsLoading.value = false
+                            if (status.items.isEmpty()) {
+                                _newsActionMessage.value = "discover_empty"
+                            } else {
+                                _newsActionMessage.value = "discover_loaded:${status.items.size}"
+                            }
+                            return@launch
+                        }
+                        "failed" -> {
+                            _newsLoading.value = false
+                            return@launch
+                        }
+                    }
+                }
+                delay(1_500)
+            }
+            _newsLoading.value = false
+            _newsActionMessage.value = "Discovery status polling timed out. Please retry."
+        }
+    }
+
+    private fun buildDiscoverStatusMessage(status: DiscoverStockStatusDto): String {
+        return when (status.state) {
+            "running" -> {
+                val progressText = if (status.progress > 0) "${status.progress}%" else ""
+                val suffix = if (progressText.isBlank()) "" else " ($progressText)"
+                "${status.message}$suffix"
+            }
+            "succeeded" -> status.message.ifBlank {
+                if (status.items.isEmpty()) "No noteworthy stocks found." else "Discovery completed."
+            }
+            "failed" -> status.error?.let { "Discovery failed: $it" } ?: "Discovery failed."
+            else -> status.message.ifBlank { "Discovery task is idle." }
+        }
+    }
+
+    fun clearNewsActionMessage() {
+        _newsActionMessage.value = ""
     }
 
     private fun startAiStatusPolling() {
@@ -218,7 +276,4 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return detail.ifBlank { "AI selection is running." }
     }
 
-    fun clearNewsActionMessage() {
-        _newsActionMessage.value = ""
-    }
 }
