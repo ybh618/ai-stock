@@ -120,7 +120,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun fetchLatestNews() {
         viewModelScope.launch {
             _newsLoading.value = true
-            val items = repo.fetchLatestNews()
+            val recentItems = repo.fetchLatestNews(hours = 24)
+            val items = if (recentItems.isEmpty()) {
+                repo.fetchLatestNews(hours = 24 * 7)
+            } else {
+                recentItems
+            }
             _news.value = items
             _newsLoading.value = false
             _newsActionMessage.value = if (items.isEmpty()) {
