@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from pydantic import ValidationError
 
 from app.core.websocket_manager import WebSocketManager
 from app.db.database import get_db
@@ -22,19 +23,32 @@ def build_ws_router(ws_manager: WebSocketManager) -> APIRouter:
         try:
             while True:
                 message = await websocket.receive_json()
-                envelope = WsEnvelope.model_validate(message)
+                try:
+                    envelope = WsEnvelope.model_validate(message)
+                except ValidationError:
+                    await websocket.send_json(
+                        {
+                            "type": "server.error",
+                            "payload": {"code": "invalid_envelope"},
+                        }
+                    )
+                    continue
                 if envelope.type == "client.hello":
                     hello = ClientHelloPayload.model_validate(envelope.payload)
                     client_id = hello.client_id
                     await ws_manager.connect(client_id, websocket)
-                    await websocket.send_json({"type": "server.hello.ack", "payload": {"ok": True}})
+                    await websocket.send_json(
+                        {"type": "server.hello.ack", "payload": {"ok": True}}
+                    )
                     continue
                 if envelope.type == "client.sync_state":
                     state = SyncStatePayload.model_validate(envelope.payload)
                     with get_db() as db:
                         replace_watchlist(db, state.client_id, state.watchlist)
                         upsert_preferences(db, state.client_id, state.preferences)
-                    await websocket.send_json({"type": "server.sync_state.ack", "payload": {"ok": True}})
+                    await websocket.send_json(
+                        {"type": "server.sync_state.ack", "payload": {"ok": True}}
+                    )
                     continue
                 if envelope.type == "ping":
                     await websocket.send_json({"type": "pong", "payload": {}})

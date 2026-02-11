@@ -33,7 +33,7 @@ class SyncStatePayload(BaseModel):
 
 class WsEnvelope(BaseModel):
     type: str
-    payload: dict
+    payload: dict = Field(default_factory=dict)
 
 
 class FeedbackInput(BaseModel):
