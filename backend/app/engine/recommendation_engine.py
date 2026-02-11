@@ -445,6 +445,7 @@ class RecommendationEngine:
             name = str(item.get("name") or "").strip() or symbol
             if not symbol:
                 return
+            activity_score = float(item.get("activity_score") or 0.0)
             async with semaphore:
                 try:
                     bars_15m = await asyncio.wait_for(
@@ -478,9 +479,22 @@ class RecommendationEngine:
                     async with scored_lock:
                         if signal.triggered:
                             scored_candidates.append(candidate)
-                        elif signal.score >= 1.0:
+                        elif signal.score >= 1.0 or activity_score >= 1.2:
                             backup_candidates.append(candidate)
                 except Exception:
+                    async with scored_lock:
+                        if activity_score >= 1.2:
+                            backup_candidates.append(
+                                Candidate(
+                                    symbol=symbol,
+                                    name=name,
+                                    score=max(0.8, activity_score / 3.0),
+                                    action_hint="buy",
+                                    reasons=["market_activity_fallback"],
+                                    market={"features": []},
+                                    news_items=[],
+                                )
+                            )
                     return
                 finally:
                     if progress_hook is not None:
@@ -548,7 +562,7 @@ class RecommendationEngine:
                 )
                 recommendation = apply_guardrails(recommendation, risk_profile)
                 if not has_enough_evidence(recommendation):
-                    continue
+                    raise RuntimeError("insufficient_evidence_for_discovery")
                 output.append(
                     {
                         "symbol": candidate.symbol,
@@ -564,7 +578,13 @@ class RecommendationEngine:
                     }
                 )
             except Exception:
-                continue
+                output.append(
+                    self._build_discovery_fallback_item(
+                        candidate=candidate,
+                        locale=locale,
+                        risk_profile=risk_profile,
+                    )
+                )
             if progress_hook is not None:
                 progress = 72 + int((idx / max(1, len(shortlist))) * 24)
                 await progress_hook(
@@ -584,7 +604,56 @@ class RecommendationEngine:
                 scanned_candidates=scan_limit,
                 total_candidates=scan_limit,
             )
+        if not output and shortlist:
+            output = [
+                self._build_discovery_fallback_item(
+                    candidate=candidate,
+                    locale=locale,
+                    risk_profile=risk_profile,
+                )
+                for candidate in shortlist[:limit]
+            ]
         return output
+
+    def _build_discovery_fallback_item(
+        self,
+        candidate: Candidate,
+        locale: str,
+        risk_profile: str,
+    ) -> dict:
+        reason_text = (
+            ", ".join(candidate.reasons[:3]) if candidate.reasons else "market_activity"
+        )
+        action = (
+            candidate.action_hint
+            if candidate.action_hint in {"buy", "hold"}
+            else "hold"
+        )
+        base_position = {"aggressive": 15.0, "neutral": 10.0, "conservative": 6.0}.get(
+            risk_profile, 10.0
+        )
+        target_position = base_position if action == "buy" else 0.0
+        confidence = max(0.25, min(0.78, 0.25 + candidate.score / 6.0))
+        summary_zh = (
+            f"{candidate.symbol} 近7日趋势与活跃度存在关注价值，"
+            f"触发因子: {reason_text}。建议先观察分批跟踪。"
+        )
+        summary_en = (
+            f"{candidate.symbol} shows a noteworthy 7-day trend/activity profile, "
+            f"signals: {reason_text}. Track gradually before sizing up."
+        )
+        return {
+            "symbol": candidate.symbol,
+            "name": candidate.name,
+            "action": action,
+            "score": candidate.score,
+            "confidence": confidence,
+            "summary_zh": summary_zh if locale != "en" else summary_zh,
+            "summary_en": summary_en,
+            "reasons": candidate.reasons or ["market_activity_fallback"],
+            "news_count": len(candidate.news_items),
+            "target_position_pct": target_position,
+        }
 
     def _score_discovery_signal(
         self,
