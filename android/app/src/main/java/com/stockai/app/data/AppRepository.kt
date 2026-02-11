@@ -2,6 +2,7 @@ package com.stockai.app.data
 
 import android.content.Context
 import com.stockai.app.network.ApiClient
+import com.stockai.app.network.NewsItemDto
 import com.stockai.app.network.RecommendationDto
 import com.stockai.app.network.SyncPreferences
 import com.stockai.app.network.SyncWatchItem
@@ -16,6 +17,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.serialization.json.Json
 import java.time.LocalTime
+import java.util.concurrent.atomic.AtomicBoolean
 
 class AppRepository private constructor(
     private val context: Context,
@@ -27,6 +29,7 @@ class AppRepository private constructor(
     private val json = Json { ignoreUnknownKeys = true }
     private val _wsConnectionState = MutableStateFlow(WsConnectionState(WsConnectionStatus.DISCONNECTED))
     private var wsClient: WsClient? = null
+    private val wsStarted = AtomicBoolean(false)
 
     fun observePreferences(): Flow<PreferenceState> = preferences.state
     fun observeWsConnectionState(): StateFlow<WsConnectionState> = _wsConnectionState.asStateFlow()
@@ -61,6 +64,14 @@ class AppRepository private constructor(
     suspend fun setQuietHours(startHour: Int, endHour: Int) {
         preferences.setQuietHours(startHour, endHour)
         pushSyncState()
+    }
+
+    suspend fun setAutoStartEnabled(enabled: Boolean) {
+        preferences.setAutoStartEnabled(enabled)
+    }
+
+    suspend fun setFloatingWindowEnabled(enabled: Boolean) {
+        preferences.setFloatingWindowEnabled(enabled)
     }
 
     fun observeRecommendations(clientId: String): Flow<List<RecommendationEntity>> = dao.observeRecommendations(clientId)
@@ -106,16 +117,21 @@ class AppRepository private constructor(
                 },
             )
         }
-        wsClient?.start(
-            baseUrl = state.backendBaseUrl,
-            clientId = state.clientId,
-            prefs = syncPrefs,
-            watchlist = watchlist,
-        )
+        if (wsStarted.compareAndSet(false, true)) {
+            wsClient?.start(
+                baseUrl = state.backendBaseUrl,
+                clientId = state.clientId,
+                prefs = syncPrefs,
+                watchlist = watchlist,
+            )
+        } else {
+            wsClient?.updateSyncState(syncPrefs, watchlist)
+        }
         syncRecommendations()
     }
 
     fun stopWs() {
+        wsStarted.set(false)
         wsClient?.stop()
         val disconnected = WsConnectionState(WsConnectionStatus.DISCONNECTED, "manual_stop")
         _wsConnectionState.value = disconnected
@@ -140,6 +156,30 @@ class AppRepository private constructor(
             helpful = helpful,
             reason = reason,
         )
+    }
+
+    suspend fun fetchLatestNews(hours: Int = 24, limit: Int = 50): List<NewsItemDto> {
+        val state = preferences.state.first()
+        if (state.clientId.isBlank()) return emptyList()
+        return apiClient.fetchLatestNews(
+            baseUrl = state.backendBaseUrl,
+            clientId = state.clientId,
+            hours = hours,
+            limit = limit,
+        )
+    }
+
+    suspend fun triggerAiRecommendation(): Boolean {
+        val state = preferences.state.first()
+        if (state.clientId.isBlank()) return false
+        val ok = apiClient.triggerAiRecommendation(
+            baseUrl = state.backendBaseUrl,
+            clientId = state.clientId,
+        )
+        if (ok) {
+            syncRecommendations()
+        }
+        return ok
     }
 
     private suspend fun onRecommendation(item: RecommendationDto) {

@@ -59,6 +59,54 @@ class ApiClient {
         }
     }
 
+    suspend fun fetchLatestNews(
+        baseUrl: String,
+        clientId: String,
+        hours: Int = 24,
+        limit: Int = 50,
+    ): List<NewsItemDto> {
+        return withContext(Dispatchers.IO) {
+            val encodedClientId = URLEncoder.encode(clientId, StandardCharsets.UTF_8)
+            val url = buildString {
+                append(baseUrl.trimEnd('/'))
+                append("/v1/news?client_id=")
+                append(encodedClientId)
+                append("&hours=")
+                append(hours)
+                append("&limit=")
+                append(limit)
+            }
+            val request = Request.Builder().url(url).get().build()
+            runCatching {
+                client.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) return@use emptyList()
+                    val body = response.body?.string().orEmpty()
+                    if (body.isBlank()) return@use emptyList()
+                    val parsed = json.decodeFromString<NewsListResponse>(body)
+                    parsed.items
+                }
+            }.getOrDefault(emptyList())
+        }
+    }
+
+    suspend fun triggerAiRecommendation(baseUrl: String, clientId: String): Boolean {
+        return withContext(Dispatchers.IO) {
+            val payload = json.encodeToString(TriggerRecommendationRequest(clientId = clientId))
+            val request = Request.Builder()
+                .url("${baseUrl.trimEnd('/')}/v1/recommendations/trigger")
+                .post(payload.toRequestBody(jsonMediaType))
+                .build()
+            runCatching {
+                client.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) return@use false
+                    val body = response.body?.string().orEmpty()
+                    if (body.isBlank()) return@use false
+                    json.decodeFromString<TriggerRecommendationResponse>(body).ok
+                }
+            }.getOrDefault(false)
+        }
+    }
+
     @kotlinx.serialization.Serializable
     private data class FeedbackRequest(
         @kotlinx.serialization.SerialName("client_id")
@@ -67,5 +115,11 @@ class ApiClient {
         val recommendationId: Int,
         val helpful: Boolean,
         val reason: String?,
+    )
+
+    @kotlinx.serialization.Serializable
+    private data class TriggerRecommendationRequest(
+        @kotlinx.serialization.SerialName("client_id")
+        val clientId: String,
     )
 }

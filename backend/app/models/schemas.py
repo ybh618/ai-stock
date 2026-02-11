@@ -64,6 +64,30 @@ class RecommendationListResponse(BaseModel):
     items: list[RecommendationDTO]
 
 
+class NewsItemDTO(BaseModel):
+    source: str
+    url: str
+    title: str
+    snippet: str
+    published_at: str
+    symbol: str
+    name: str
+    sentiment_hint: str = "neutral"
+
+
+class NewsListResponse(BaseModel):
+    items: list[NewsItemDTO]
+
+
+class RecommendationTriggerInput(BaseModel):
+    client_id: str
+
+
+class RecommendationTriggerResponse(BaseModel):
+    ok: bool = True
+    client_id: str
+
+
 class LlmOutput(BaseModel):
     summary_zh: str
     summary_en: str

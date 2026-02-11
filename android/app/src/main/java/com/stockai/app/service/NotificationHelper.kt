@@ -17,6 +17,9 @@ import com.stockai.app.network.WsConnectionStatus
 object NotificationHelper {
     const val CHANNEL_ID = "recommendations"
     const val SERVICE_NOTIFICATION_ID = 1001
+    const val ACTION_WS_STATE_CHANGED = "com.stockai.app.WS_STATE_CHANGED"
+    const val EXTRA_WS_STATUS = "ws_status"
+    const val EXTRA_WS_DETAIL = "ws_detail"
     private const val DEBUG_NOTIFICATION_ID = 1002
 
     fun ensureChannel(context: Context) {
@@ -48,6 +51,13 @@ object NotificationHelper {
         ensureChannel(context)
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         manager.notify(SERVICE_NOTIFICATION_ID, buildServiceNotification(context, state))
+        context.sendBroadcast(
+            Intent(ACTION_WS_STATE_CHANGED).apply {
+                setPackage(context.packageName)
+                putExtra(EXTRA_WS_STATUS, state.status.name)
+                putExtra(EXTRA_WS_DETAIL, state.detail)
+            }
+        )
     }
 
     fun showRecommendation(context: Context, item: RecommendationDto, useChinese: Boolean) {

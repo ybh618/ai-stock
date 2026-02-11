@@ -2,8 +2,11 @@ package com.stockai.app
 
 import android.Manifest
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -24,10 +27,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -45,16 +51,17 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat
 import androidx.core.os.LocaleListCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.stockai.app.network.NewsItemDto
 import com.stockai.app.data.RecommendationEntity
 import com.stockai.app.data.WatchlistEntity
 import com.stockai.app.network.WsConnectionState
 import com.stockai.app.network.WsConnectionStatus
-import com.stockai.app.service.WsForegroundService
+import com.stockai.app.service.ServiceLauncher
 import com.stockai.app.ui.MainViewModel
 
 class MainActivity : ComponentActivity() {
@@ -70,13 +77,7 @@ class MainActivity : ComponentActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
-        val serviceIntent = Intent(this, WsForegroundService::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            ContextCompat.startForegroundService(this, serviceIntent)
-        } else {
-            startService(serviceIntent)
-        }
-        vm.startRealtime()
+        ServiceLauncher.startWsForegroundService(this)
         vm.syncRecommendations()
         val startRecommendationId = intent?.getIntExtra("recommendation_id", -1)?.takeIf { it > 0 }
         setContent {
@@ -85,10 +86,19 @@ class MainActivity : ComponentActivity() {
                 LaunchedEffect(prefs.locale) {
                     applyAppLocale(prefs.locale)
                 }
+                LaunchedEffect(prefs.floatingWindowEnabled) {
+                    ServiceLauncher.syncFloatingWidgetService(this@MainActivity, prefs.floatingWindowEnabled)
+                }
                 if (!prefs.disclaimerAccepted) {
                     DisclaimerScreen(onAccept = vm::acceptDisclaimer)
                 } else {
-                    MainApp(vm = vm, startRecommendationId = startRecommendationId)
+                    MainApp(
+                        vm = vm,
+                        startRecommendationId = startRecommendationId,
+                        onToggleFloatingWindow = ::onToggleFloatingWindow,
+                        onRequestOverlayPermission = ::requestOverlayPermission,
+                        onRequestIgnoreBatteryOptimizations = ::requestIgnoreBatteryOptimizations,
+                    )
                 }
             }
         }
@@ -110,6 +120,41 @@ class MainActivity : ComponentActivity() {
             else -> ""
         }
         AppCompatDelegate.setApplicationLocales(LocaleListCompat.forLanguageTags(tags))
+    }
+
+    private fun onToggleFloatingWindow(enabled: Boolean) {
+        vm.setFloatingWindowEnabled(enabled)
+        if (enabled) {
+            if (ServiceLauncher.canDrawOverlays(this)) {
+                ServiceLauncher.startFloatingWidgetService(this)
+            } else {
+                requestOverlayPermission()
+            }
+        } else {
+            ServiceLauncher.stopFloatingWidgetService(this)
+        }
+    }
+
+    private fun requestOverlayPermission() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M || ServiceLauncher.canDrawOverlays(this)) return
+        val intent = Intent(
+            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+            Uri.parse("package:$packageName")
+        )
+        startActivity(intent)
+    }
+
+    private fun requestIgnoreBatteryOptimizations() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
+        val pm = getSystemService(PowerManager::class.java)
+        if (pm != null && pm.isIgnoringBatteryOptimizations(packageName)) return
+        val directIntent = Intent(
+            Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+            Uri.parse("package:$packageName")
+        )
+        runCatching { startActivity(directIntent) }.onFailure {
+            startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+        }
     }
 }
 
@@ -134,10 +179,19 @@ private fun DisclaimerScreen(onAccept: () -> Unit) {
 
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
-private fun MainApp(vm: MainViewModel, startRecommendationId: Int?) {
+private fun MainApp(
+    vm: MainViewModel,
+    startRecommendationId: Int?,
+    onToggleFloatingWindow: (Boolean) -> Unit,
+    onRequestOverlayPermission: () -> Unit,
+    onRequestIgnoreBatteryOptimizations: () -> Unit,
+) {
     var tab by rememberSaveable { mutableStateOf(if (startRecommendationId != null) "recommendations" else "watchlist") }
     val watchlist by vm.watchlist.collectAsStateWithLifecycle()
     val recommendations by vm.recommendations.collectAsStateWithLifecycle()
+    val news by vm.news.collectAsStateWithLifecycle()
+    val newsLoading by vm.newsLoading.collectAsStateWithLifecycle()
+    val newsActionMessage by vm.newsActionMessage.collectAsStateWithLifecycle()
     val prefs by vm.prefs.collectAsStateWithLifecycle()
     val wsConnectionState by vm.wsConnectionState.collectAsStateWithLifecycle()
     var selectedRecommendationId by rememberSaveable { mutableStateOf(startRecommendationId) }
@@ -162,6 +216,7 @@ private fun MainApp(vm: MainViewModel, startRecommendationId: Int?) {
                         when (tab) {
                             "watchlist" -> stringResource(R.string.watchlist)
                             "recommendations" -> stringResource(R.string.recommendations)
+                            "news" -> stringResource(R.string.news)
                             else -> stringResource(R.string.settings)
                         }
                     )
@@ -188,6 +243,12 @@ private fun MainApp(vm: MainViewModel, startRecommendationId: Int?) {
                     label = { Text(stringResource(R.string.settings)) },
                     icon = {}
                 )
+                NavigationBarItem(
+                    selected = tab == "news",
+                    onClick = { tab = "news" },
+                    label = { Text(stringResource(R.string.news)) },
+                    icon = {}
+                )
             }
         }
     ) { padding ->
@@ -204,6 +265,20 @@ private fun MainApp(vm: MainViewModel, startRecommendationId: Int?) {
                 locale = prefs.locale,
                 onClick = { selectedRecommendationId = it.id }
             )
+            "news" -> NewsScreen(
+                padding = padding,
+                items = news,
+                loading = newsLoading,
+                actionMessage = newsActionMessage,
+                onFetchNews = {
+                    vm.clearNewsActionMessage()
+                    vm.fetchLatestNews()
+                },
+                onTriggerAi = {
+                    vm.clearNewsActionMessage()
+                    vm.triggerAiStockRecommendation()
+                }
+            )
             else -> SettingsScreen(
                 padding = padding,
                 locale = prefs.locale,
@@ -213,11 +288,17 @@ private fun MainApp(vm: MainViewModel, startRecommendationId: Int?) {
                 wsConnectionState = wsConnectionState,
                 quietStartHour = prefs.quietStartHour,
                 quietEndHour = prefs.quietEndHour,
+                autoStartEnabled = prefs.autoStartEnabled,
+                floatingWindowEnabled = prefs.floatingWindowEnabled,
                 onLocale = vm::setLocale,
                 onNotifications = vm::setNotificationsEnabled,
                 onRiskProfile = vm::setRiskProfile,
                 onBackendUrlSave = vm::setBackendBaseUrl,
                 onQuietHours = vm::setQuietHours,
+                onAutoStartEnabled = vm::setAutoStartEnabled,
+                onFloatingWindowEnabled = { onToggleFloatingWindow(it) },
+                onRequestOverlayPermission = onRequestOverlayPermission,
+                onRequestIgnoreBatteryOptimizations = onRequestIgnoreBatteryOptimizations,
             )
         }
     }
@@ -319,6 +400,119 @@ private fun RecommendationsScreen(
 }
 
 @Composable
+private fun NewsScreen(
+    padding: PaddingValues,
+    items: List<NewsItemDto>,
+    loading: Boolean,
+    actionMessage: String,
+    onFetchNews: () -> Unit,
+    onTriggerAi: () -> Unit,
+) {
+    val context = LocalContext.current
+    val messageText = newsActionMessageText(actionMessage)
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(padding)
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Button(
+                    onClick = onFetchNews,
+                    enabled = !loading,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(stringResource(R.string.fetch_latest_news))
+                }
+                Button(
+                    onClick = onTriggerAi,
+                    enabled = !loading,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(stringResource(R.string.ai_stock_recommendation))
+                }
+            }
+        }
+        if (loading) {
+            item {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp),
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    CircularProgressIndicator()
+                }
+            }
+        }
+        if (messageText != null) {
+            item {
+                Text(
+                    text = messageText,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+        if (!loading && items.isEmpty()) {
+            item {
+                Text(
+                    text = stringResource(R.string.news_empty),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+        items(items) { item ->
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(item.url))
+                        runCatching { context.startActivity(intent) }
+                    }
+            ) {
+                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        text = "[${item.symbol}] ${item.title}",
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                    Text(
+                        text = item.snippet,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Text(
+                        text = "${item.source} • ${item.publishedAt}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun newsActionMessageText(raw: String): String? {
+    if (raw.isBlank()) return null
+    return when {
+        raw == "ai_trigger_ok" -> stringResource(R.string.ai_trigger_ok)
+        raw == "ai_trigger_failed" -> stringResource(R.string.ai_trigger_failed)
+        raw == "news_empty" -> stringResource(R.string.news_empty)
+        raw.startsWith("news_loaded:") -> {
+            val count = raw.substringAfter("news_loaded:", "0")
+            stringResource(R.string.news_loaded_count, count)
+        }
+        else -> raw
+    }
+}
+
+@Composable
 private fun RecommendationDetailDialog(
     item: RecommendationEntity,
     locale: String,
@@ -360,12 +554,26 @@ private fun SettingsScreen(
     wsConnectionState: WsConnectionState,
     quietStartHour: Int,
     quietEndHour: Int,
+    autoStartEnabled: Boolean,
+    floatingWindowEnabled: Boolean,
     onLocale: (String) -> Unit,
     onNotifications: (Boolean) -> Unit,
     onRiskProfile: (String) -> Unit,
     onBackendUrlSave: (String) -> Unit,
     onQuietHours: (Int, Int) -> Unit,
+    onAutoStartEnabled: (Boolean) -> Unit,
+    onFloatingWindowEnabled: (Boolean) -> Unit,
+    onRequestOverlayPermission: () -> Unit,
+    onRequestIgnoreBatteryOptimizations: () -> Unit,
 ) {
+    val context = LocalContext.current
+    val canDrawOverlay = ServiceLauncher.canDrawOverlays(context)
+    val powerManager = context.getSystemService(PowerManager::class.java)
+    val batteryOptimizationIgnored = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+        powerManager?.isIgnoringBatteryOptimizations(context.packageName) == true
+    } else {
+        true
+    }
     var backendUrlInput by rememberSaveable(backendBaseUrl) { mutableStateOf(backendBaseUrl) }
     val localeLabel = when (locale) {
         "zh" -> stringResource(R.string.locale_value_zh)
@@ -395,7 +603,8 @@ private fun SettingsScreen(
         modifier = Modifier
             .fillMaxSize()
             .padding(padding)
-            .padding(16.dp),
+            .padding(16.dp)
+            .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Row(
@@ -428,6 +637,43 @@ private fun SettingsScreen(
         Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
             Text(stringResource(R.string.notifications))
             Switch(checked = notificationsEnabled, onCheckedChange = onNotifications)
+        }
+
+        Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+            Text(stringResource(R.string.auto_start))
+            Switch(checked = autoStartEnabled, onCheckedChange = onAutoStartEnabled)
+        }
+
+        Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+            Text(stringResource(R.string.floating_window))
+            Switch(checked = floatingWindowEnabled, onCheckedChange = onFloatingWindowEnabled)
+        }
+        Text(
+            text = if (canDrawOverlay) {
+                stringResource(R.string.floating_window_permission_granted)
+            } else {
+                stringResource(R.string.floating_window_permission_required)
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        if (!canDrawOverlay) {
+            Button(onClick = onRequestOverlayPermission) {
+                Text(stringResource(R.string.floating_window_grant_button))
+            }
+        }
+
+        Text(
+            text = if (batteryOptimizationIgnored) {
+                stringResource(R.string.battery_optimization_ignored)
+            } else {
+                stringResource(R.string.battery_optimization_active)
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Button(onClick = onRequestIgnoreBatteryOptimizations) {
+            Text(stringResource(R.string.battery_optimization_disable_button))
         }
 
         Text("${stringResource(R.string.risk)}: $riskLabel")

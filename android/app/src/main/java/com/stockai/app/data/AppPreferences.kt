@@ -28,6 +28,8 @@ class AppPreferences(private val context: Context) {
             backendBaseUrl = prefs[BACKEND_BASE_URL] ?: "http://10.0.2.2:3005",
             quietStartHour = prefs[QUIET_START_HOUR] ?: 22,
             quietEndHour = prefs[QUIET_END_HOUR] ?: 8,
+            autoStartEnabled = prefs[AUTO_START_ENABLED] ?: true,
+            floatingWindowEnabled = prefs[FLOATING_WINDOW_ENABLED] ?: false,
         )
     }
 
@@ -68,6 +70,14 @@ class AppPreferences(private val context: Context) {
         dataStore.edit { it[BACKEND_BASE_URL] = url }
     }
 
+    suspend fun setAutoStartEnabled(enabled: Boolean) {
+        dataStore.edit { it[AUTO_START_ENABLED] = enabled }
+    }
+
+    suspend fun setFloatingWindowEnabled(enabled: Boolean) {
+        dataStore.edit { it[FLOATING_WINDOW_ENABLED] = enabled }
+    }
+
     companion object {
         val CLIENT_ID = stringPreferencesKey("client_id")
         private val LOCALE = stringPreferencesKey("locale")
@@ -77,6 +87,8 @@ class AppPreferences(private val context: Context) {
         private val BACKEND_BASE_URL = stringPreferencesKey("backend_base_url")
         private val QUIET_START_HOUR = intPreferencesKey("quiet_start_hour")
         private val QUIET_END_HOUR = intPreferencesKey("quiet_end_hour")
+        private val AUTO_START_ENABLED = booleanPreferencesKey("auto_start_enabled")
+        private val FLOATING_WINDOW_ENABLED = booleanPreferencesKey("floating_window_enabled")
     }
 }
 
@@ -89,4 +101,6 @@ data class PreferenceState(
     val backendBaseUrl: String,
     val quietStartHour: Int,
     val quietEndHour: Int,
+    val autoStartEnabled: Boolean,
+    val floatingWindowEnabled: Boolean,
 )

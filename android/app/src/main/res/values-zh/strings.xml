@@ -5,6 +5,7 @@
     <string name="accept">我已知晓</string>
     <string name="watchlist">自选股</string>
     <string name="recommendations">推荐历史</string>
+    <string name="news">新闻</string>
     <string name="settings">设置</string>
     <string name="notifications_channel">推荐提醒</string>
     <string name="foreground_service_title">股票 AI 在线</string>
@@ -15,6 +16,15 @@
     <string name="name">名称</string>
     <string name="locale">语言</string>
     <string name="notifications">通知</string>
+    <string name="auto_start">开机自启动</string>
+    <string name="floating_window">悬浮窗</string>
+    <string name="floating_window_permission_required">需要授予悬浮窗权限后才可显示。</string>
+    <string name="floating_window_permission_granted">悬浮窗权限已授予。</string>
+    <string name="floating_window_grant_button">去授予悬浮窗权限</string>
+    <string name="floating_window_tap_hint">点击可回到应用</string>
+    <string name="battery_optimization_active">当前仍受电池优化限制。</string>
+    <string name="battery_optimization_ignored">已为此应用关闭电池优化。</string>
+    <string name="battery_optimization_disable_button">关闭电池优化</string>
     <string name="risk">风险</string>
     <string name="quiet_hours">静默时段</string>
     <string name="feedback_useful">有用</string>
@@ -42,4 +52,10 @@
     <string name="connection_status_reconnecting">重连中</string>
     <string name="connection_status_failed">连接失败</string>
     <string name="connection_status_disconnected">未连接</string>
+    <string name="fetch_latest_news">获取最新新闻</string>
+    <string name="ai_stock_recommendation">AI选股推荐</string>
+    <string name="news_empty">暂无新闻，点击“获取最新新闻”。</string>
+    <string name="news_loaded_count">已加载 %1$s 条新闻。</string>
+    <string name="ai_trigger_ok">已触发AI选股，正在等待推送结果。</string>
+    <string name="ai_trigger_failed">触发AI选股失败。</string>
 </resources>

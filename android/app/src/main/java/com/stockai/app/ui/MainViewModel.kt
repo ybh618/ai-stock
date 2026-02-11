@@ -7,6 +7,7 @@ import com.stockai.app.data.AppRepository
 import com.stockai.app.data.PreferenceState
 import com.stockai.app.data.RecommendationEntity
 import com.stockai.app.data.WatchlistEntity
+import com.stockai.app.network.NewsItemDto
 import com.stockai.app.network.WsConnectionState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -31,14 +32,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 backendBaseUrl = "http://10.0.2.2:3005",
                 quietStartHour = 22,
                 quietEndHour = 8,
+                autoStartEnabled = true,
+                floatingWindowEnabled = false,
             ),
         )
 
     private val _recommendations = MutableStateFlow<List<RecommendationEntity>>(emptyList())
     private val _watchlist = MutableStateFlow<List<WatchlistEntity>>(emptyList())
+    private val _news = MutableStateFlow<List<NewsItemDto>>(emptyList())
+    private val _newsLoading = MutableStateFlow(false)
+    private val _newsActionMessage = MutableStateFlow("")
 
     val recommendations: StateFlow<List<RecommendationEntity>> = _recommendations.asStateFlow()
     val watchlist: StateFlow<List<WatchlistEntity>> = _watchlist.asStateFlow()
+    val news: StateFlow<List<NewsItemDto>> = _news.asStateFlow()
+    val newsLoading: StateFlow<Boolean> = _newsLoading.asStateFlow()
+    val newsActionMessage: StateFlow<String> = _newsActionMessage.asStateFlow()
     val wsConnectionState: StateFlow<WsConnectionState> = repo.observeWsConnectionState()
 
     init {
@@ -76,6 +85,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { repo.setQuietHours(startHour, endHour) }
     }
 
+    fun setAutoStartEnabled(enabled: Boolean) {
+        viewModelScope.launch { repo.setAutoStartEnabled(enabled) }
+    }
+
+    fun setFloatingWindowEnabled(enabled: Boolean) {
+        viewModelScope.launch { repo.setFloatingWindowEnabled(enabled) }
+    }
+
     fun submitFeedback(recommendationId: Int, helpful: Boolean, reason: String?) {
         viewModelScope.launch { repo.submitFeedback(recommendationId, helpful, reason) }
     }
@@ -98,5 +115,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun stopRealtime() {
         repo.stopWs()
+    }
+
+    fun fetchLatestNews() {
+        viewModelScope.launch {
+            _newsLoading.value = true
+            val items = repo.fetchLatestNews()
+            _news.value = items
+            _newsLoading.value = false
+            _newsActionMessage.value = if (items.isEmpty()) {
+                "news_empty"
+            } else {
+                "news_loaded:${items.size}"
+            }
+        }
+    }
+
+    fun triggerAiStockRecommendation() {
+        viewModelScope.launch {
+            _newsLoading.value = true
+            val ok = repo.triggerAiRecommendation()
+            _newsLoading.value = false
+            _newsActionMessage.value = if (ok) "ai_trigger_ok" else "ai_trigger_failed"
+        }
+    }
+
+    fun clearNewsActionMessage() {
+        _newsActionMessage.value = ""
     }
 }

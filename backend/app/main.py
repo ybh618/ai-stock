@@ -47,6 +47,8 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
 app.state.debug_service = debug_service
 app.state.ws_manager = ws_manager
+app.state.news_provider = news_provider
+app.state.rec_engine = rec_engine
 app.include_router(http_router)
 app.include_router(build_ws_router(ws_manager))
 

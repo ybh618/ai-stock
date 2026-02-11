@@ -37,6 +37,29 @@ data class RecommendationListResponse(
 )
 
 @Serializable
+data class NewsItemDto(
+    val source: String,
+    val url: String,
+    val title: String,
+    val snippet: String,
+    @SerialName("published_at") val publishedAt: String,
+    val symbol: String,
+    val name: String,
+    @SerialName("sentiment_hint") val sentimentHint: String = "neutral",
+)
+
+@Serializable
+data class NewsListResponse(
+    val items: List<NewsItemDto>
+)
+
+@Serializable
+data class TriggerRecommendationResponse(
+    val ok: Boolean = false,
+    @SerialName("client_id") val clientId: String = "",
+)
+
+@Serializable
 data class DebugResultPayload(
     val summary: String,
     val result: JsonElement,
