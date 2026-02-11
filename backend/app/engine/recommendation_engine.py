@@ -173,6 +173,127 @@ class RecommendationEngine:
             status.error = error
             self._status_by_client[client_id] = status
 
+    async def discover_stocks(
+        self,
+        client_id: str,
+        limit: int = 5,
+        universe_limit: int = 80,
+    ) -> list[dict]:
+        with get_db() as db:
+            pref = repository.get_preferences(db, client_id)
+            fallback_watchlist = repository.get_watchlist(db, client_id)
+        risk_profile = pref.risk_profile if pref else "neutral"
+        locale = pref.locale if pref else "zh"
+
+        raw_candidates: list[dict] = []
+        try:
+            raw_candidates = self.market_provider.discover_candidates(
+                limit=universe_limit
+            )
+        except Exception:
+            raw_candidates = []
+        if not raw_candidates:
+            raw_candidates = [
+                {"symbol": item.symbol, "name": item.name}
+                for item in fallback_watchlist
+            ]
+        if not raw_candidates:
+            return []
+
+        semaphore = asyncio.Semaphore(6)
+        scored_candidates: list[Candidate] = []
+        scored_lock = asyncio.Lock()
+
+        async def _evaluate(item: dict) -> None:
+            symbol = str(item.get("symbol") or "").strip()
+            name = str(item.get("name") or "").strip() or symbol
+            if not symbol:
+                return
+            async with semaphore:
+                try:
+                    bars_15m = self.market_provider.get_15m_bars(symbol)
+                    bars_daily = self.market_provider.get_daily_bars(symbol)
+                    news = await self.news_provider.get_recent_news(
+                        symbol, name, hours=24
+                    )
+                    market = extract_market_features(symbol, bars_15m, bars_daily)
+                    result = prefilter_candidate(
+                        symbol=symbol,
+                        name=name,
+                        market=market,
+                        bars_15m=bars_15m,
+                        bars_daily=bars_daily,
+                        news_items=news,
+                        risk_profile=risk_profile,
+                    )
+                    if not result.triggered:
+                        return
+                    async with scored_lock:
+                        scored_candidates.append(
+                            Candidate(
+                                symbol=symbol,
+                                name=name,
+                                score=result.score,
+                                action_hint=result.action_hint,
+                                reasons=result.reasons,
+                                market=market,
+                                news_items=news,
+                            )
+                        )
+                except Exception:
+                    return
+
+        await asyncio.gather(
+            *[_evaluate(item) for item in raw_candidates], return_exceptions=True
+        )
+        scored_candidates.sort(key=lambda c: c.score, reverse=True)
+        shortlist = scored_candidates[: max(limit * 2, limit)]
+        if not shortlist:
+            return []
+
+        output: list[dict] = []
+        for candidate in shortlist:
+            try:
+                context = CandidateContext(
+                    client_id=client_id,
+                    symbol=candidate.symbol,
+                    name=candidate.name,
+                    risk_profile=risk_profile,
+                    locale=locale,
+                    market_features=candidate.market.get("features", []),
+                    news_items=candidate.news_items[:8],
+                    recent_recommendations=[],
+                )
+                llm_output = await self.llm_client.generate(context)
+                recommendation = self._finalize_recommendation(
+                    output=llm_output,
+                    action_hint=candidate.action_hint,
+                    market_features=context.market_features,
+                    news_items=context.news_items,
+                )
+                recommendation = apply_guardrails(recommendation, risk_profile)
+                if not has_enough_evidence(recommendation):
+                    continue
+                output.append(
+                    {
+                        "symbol": candidate.symbol,
+                        "name": candidate.name,
+                        "action": recommendation.action,
+                        "score": candidate.score,
+                        "confidence": recommendation.confidence,
+                        "summary_zh": recommendation.summary_zh,
+                        "summary_en": recommendation.summary_en,
+                        "reasons": candidate.reasons,
+                        "news_count": len(candidate.news_items),
+                        "target_position_pct": recommendation.target_position_pct,
+                    }
+                )
+            except Exception:
+                continue
+            if len(output) >= limit:
+                break
+        return output
+
     async def scan_all_clients(self, db: Session) -> None:
         client_ids = repository.get_all_client_ids(db)
         for client_id in client_ids:

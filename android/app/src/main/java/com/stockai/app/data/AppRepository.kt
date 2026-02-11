@@ -2,6 +2,7 @@ package com.stockai.app.data
 
 import android.content.Context
 import com.stockai.app.network.ApiClient
+import com.stockai.app.network.DiscoverStockDto
 import com.stockai.app.network.NewsItemDto
 import com.stockai.app.network.RecommendationStatusDto
 import com.stockai.app.network.RecommendationDto
@@ -74,6 +75,10 @@ class AppRepository private constructor(
 
     suspend fun setFloatingWindowEnabled(enabled: Boolean) {
         preferences.setFloatingWindowEnabled(enabled)
+    }
+
+    suspend fun setDiscoverModeEnabled(enabled: Boolean) {
+        preferences.setDiscoverModeEnabled(enabled)
     }
 
     fun observeRecommendations(clientId: String): Flow<List<RecommendationEntity>> = dao.observeRecommendations(clientId)
@@ -188,6 +193,17 @@ class AppRepository private constructor(
         return apiClient.fetchAiRecommendationStatus(
             baseUrl = state.backendBaseUrl,
             clientId = state.clientId,
+        )
+    }
+
+    suspend fun fetchDiscoveredStocks(limit: Int = 5, universeLimit: Int = 80): List<DiscoverStockDto> {
+        val state = preferences.state.first()
+        if (state.clientId.isBlank()) return emptyList()
+        return apiClient.fetchDiscoveredStocks(
+            baseUrl = state.backendBaseUrl,
+            clientId = state.clientId,
+            limit = limit,
+            universeLimit = universeLimit,
         )
     }
 

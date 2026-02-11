@@ -18,6 +18,7 @@
     <string name="notifications">通知</string>
     <string name="auto_start">开机自启动</string>
     <string name="floating_window">悬浮窗</string>
+    <string name="discover_mode">发现新股模式</string>
     <string name="floating_window_permission_required">需要授予悬浮窗权限后才可显示。</string>
     <string name="floating_window_permission_granted">悬浮窗权限已授予。</string>
     <string name="floating_window_grant_button">去授予悬浮窗权限</string>
@@ -54,6 +55,10 @@
     <string name="connection_status_disconnected">未连接</string>
     <string name="fetch_latest_news">获取最新新闻</string>
     <string name="ai_stock_recommendation">AI选股推荐</string>
+    <string name="discover_new_stocks">发现新股</string>
+    <string name="discover_results_title">新发现股票</string>
+    <string name="discover_empty">未发现值得注意的新股票。</string>
+    <string name="discover_loaded_count">已发现 %1$s 只值得注意的股票。</string>
     <string name="news_empty">暂无新闻，点击“获取最新新闻”。</string>
     <string name="news_loaded_count">已加载 %1$s 条新闻。</string>
     <string name="ai_trigger_ok">已触发AI选股，正在等待推送结果。</string>

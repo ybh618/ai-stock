@@ -18,6 +18,7 @@
     <string name="notifications">Notifications</string>
     <string name="auto_start">Auto Start on Boot</string>
     <string name="floating_window">Floating Window</string>
+    <string name="discover_mode">Discovery Mode</string>
     <string name="floating_window_permission_required">Overlay permission is required to show floating window.</string>
     <string name="floating_window_permission_granted">Overlay permission granted.</string>
     <string name="floating_window_grant_button">Grant Overlay Permission</string>
@@ -54,6 +55,10 @@
     <string name="connection_status_disconnected">Disconnected</string>
     <string name="fetch_latest_news">Fetch Latest News</string>
     <string name="ai_stock_recommendation">AI Stock Recommendation</string>
+    <string name="discover_new_stocks">Discover New Stocks</string>
+    <string name="discover_results_title">Discovered Stocks</string>
+    <string name="discover_empty">No noteworthy stocks found.</string>
+    <string name="discover_loaded_count">Discovered %1$s noteworthy stocks.</string>
     <string name="news_empty">No news yet. Tap \"Fetch Latest News\".</string>
     <string name="news_loaded_count">Loaded %1$s news items.</string>
     <string name="ai_trigger_ok">AI recommendation triggered. Waiting for push updates.</string>

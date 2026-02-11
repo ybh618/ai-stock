@@ -30,6 +30,7 @@ class AppPreferences(private val context: Context) {
             quietEndHour = prefs[QUIET_END_HOUR] ?: 8,
             autoStartEnabled = prefs[AUTO_START_ENABLED] ?: true,
             floatingWindowEnabled = prefs[FLOATING_WINDOW_ENABLED] ?: false,
+            discoverModeEnabled = prefs[DISCOVER_MODE_ENABLED] ?: false,
         )
     }
 
@@ -78,6 +79,10 @@ class AppPreferences(private val context: Context) {
         dataStore.edit { it[FLOATING_WINDOW_ENABLED] = enabled }
     }
 
+    suspend fun setDiscoverModeEnabled(enabled: Boolean) {
+        dataStore.edit { it[DISCOVER_MODE_ENABLED] = enabled }
+    }
+
     companion object {
         val CLIENT_ID = stringPreferencesKey("client_id")
         private val LOCALE = stringPreferencesKey("locale")
@@ -89,6 +94,7 @@ class AppPreferences(private val context: Context) {
         private val QUIET_END_HOUR = intPreferencesKey("quiet_end_hour")
         private val AUTO_START_ENABLED = booleanPreferencesKey("auto_start_enabled")
         private val FLOATING_WINDOW_ENABLED = booleanPreferencesKey("floating_window_enabled")
+        private val DISCOVER_MODE_ENABLED = booleanPreferencesKey("discover_mode_enabled")
     }
 }
 
@@ -103,4 +109,5 @@ data class PreferenceState(
     val quietEndHour: Int,
     val autoStartEnabled: Boolean,
     val floatingWindowEnabled: Boolean,
+    val discoverModeEnabled: Boolean,
 )

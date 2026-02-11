@@ -57,6 +57,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.os.LocaleListCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.stockai.app.network.NewsItemDto
+import com.stockai.app.network.DiscoverStockDto
 import com.stockai.app.data.RecommendationEntity
 import com.stockai.app.data.WatchlistEntity
 import com.stockai.app.network.WsConnectionState
@@ -190,6 +191,7 @@ private fun MainApp(
     val watchlist by vm.watchlist.collectAsStateWithLifecycle()
     val recommendations by vm.recommendations.collectAsStateWithLifecycle()
     val news by vm.news.collectAsStateWithLifecycle()
+    val discoveries by vm.discoveries.collectAsStateWithLifecycle()
     val newsLoading by vm.newsLoading.collectAsStateWithLifecycle()
     val newsActionMessage by vm.newsActionMessage.collectAsStateWithLifecycle()
     val prefs by vm.prefs.collectAsStateWithLifecycle()
@@ -268,6 +270,8 @@ private fun MainApp(
             "news" -> NewsScreen(
                 padding = padding,
                 items = news,
+                discoveries = discoveries,
+                discoverModeEnabled = prefs.discoverModeEnabled,
                 loading = newsLoading,
                 actionMessage = newsActionMessage,
                 onFetchNews = {
@@ -277,7 +281,11 @@ private fun MainApp(
                 onTriggerAi = {
                     vm.clearNewsActionMessage()
                     vm.triggerAiStockRecommendation()
-                }
+                },
+                onDiscover = {
+                    vm.clearNewsActionMessage()
+                    vm.discoverNewStocks()
+                },
             )
             else -> SettingsScreen(
                 padding = padding,
@@ -290,6 +298,7 @@ private fun MainApp(
                 quietEndHour = prefs.quietEndHour,
                 autoStartEnabled = prefs.autoStartEnabled,
                 floatingWindowEnabled = prefs.floatingWindowEnabled,
+                discoverModeEnabled = prefs.discoverModeEnabled,
                 onLocale = vm::setLocale,
                 onNotifications = vm::setNotificationsEnabled,
                 onRiskProfile = vm::setRiskProfile,
@@ -297,6 +306,7 @@ private fun MainApp(
                 onQuietHours = vm::setQuietHours,
                 onAutoStartEnabled = vm::setAutoStartEnabled,
                 onFloatingWindowEnabled = { onToggleFloatingWindow(it) },
+                onDiscoverModeEnabled = vm::setDiscoverModeEnabled,
                 onRequestOverlayPermission = onRequestOverlayPermission,
                 onRequestIgnoreBatteryOptimizations = onRequestIgnoreBatteryOptimizations,
             )
@@ -403,10 +413,13 @@ private fun RecommendationsScreen(
 private fun NewsScreen(
     padding: PaddingValues,
     items: List<NewsItemDto>,
+    discoveries: List<DiscoverStockDto>,
+    discoverModeEnabled: Boolean,
     loading: Boolean,
     actionMessage: String,
     onFetchNews: () -> Unit,
     onTriggerAi: () -> Unit,
+    onDiscover: () -> Unit,
 ) {
     val context = LocalContext.current
     val messageText = newsActionMessageText(actionMessage)
@@ -419,10 +432,7 @@ private fun NewsScreen(
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
                     onClick = onFetchNews,
                     enabled = !loading,
@@ -436,6 +446,17 @@ private fun NewsScreen(
                     modifier = Modifier.weight(1f)
                 ) {
                     Text(stringResource(R.string.ai_stock_recommendation))
+                }
+            }
+        }
+        if (discoverModeEnabled) {
+            item {
+                Button(
+                    onClick = onDiscover,
+                    enabled = !loading,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(stringResource(R.string.discover_new_stocks))
                 }
             }
         }
@@ -466,6 +487,33 @@ private fun NewsScreen(
                     text = stringResource(R.string.news_empty),
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+            }
+        }
+        if (discoveries.isNotEmpty()) {
+            item {
+                Text(
+                    text = stringResource(R.string.discover_results_title),
+                    style = MaterialTheme.typography.titleMedium,
+                )
+            }
+        }
+        items(discoveries) { item ->
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        text = "[${item.action.uppercase()}] ${item.symbol} ${item.name}",
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                    Text(
+                        text = item.summaryZh,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Text(
+                        text = "score=${item.score}, confidence=${item.confidence}, news=${item.newsCount}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
         }
         items(items) { item ->
@@ -504,6 +552,11 @@ private fun newsActionMessageText(raw: String): String? {
         raw == "ai_trigger_ok" -> stringResource(R.string.ai_trigger_ok)
         raw == "ai_trigger_failed" -> stringResource(R.string.ai_trigger_failed)
         raw == "news_empty" -> stringResource(R.string.news_empty)
+        raw == "discover_empty" -> stringResource(R.string.discover_empty)
+        raw.startsWith("discover_loaded:") -> {
+            val count = raw.substringAfter("discover_loaded:", "0")
+            stringResource(R.string.discover_loaded_count, count)
+        }
         raw.startsWith("news_loaded:") -> {
             val count = raw.substringAfter("news_loaded:", "0")
             stringResource(R.string.news_loaded_count, count)
@@ -556,6 +609,7 @@ private fun SettingsScreen(
     quietEndHour: Int,
     autoStartEnabled: Boolean,
     floatingWindowEnabled: Boolean,
+    discoverModeEnabled: Boolean,
     onLocale: (String) -> Unit,
     onNotifications: (Boolean) -> Unit,
     onRiskProfile: (String) -> Unit,
@@ -563,6 +617,7 @@ private fun SettingsScreen(
     onQuietHours: (Int, Int) -> Unit,
     onAutoStartEnabled: (Boolean) -> Unit,
     onFloatingWindowEnabled: (Boolean) -> Unit,
+    onDiscoverModeEnabled: (Boolean) -> Unit,
     onRequestOverlayPermission: () -> Unit,
     onRequestIgnoreBatteryOptimizations: () -> Unit,
 ) {
@@ -647,6 +702,10 @@ private fun SettingsScreen(
         Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
             Text(stringResource(R.string.floating_window))
             Switch(checked = floatingWindowEnabled, onCheckedChange = onFloatingWindowEnabled)
+        }
+        Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+            Text(stringResource(R.string.discover_mode))
+            Switch(checked = discoverModeEnabled, onCheckedChange = onDiscoverModeEnabled)
         }
         Text(
             text = if (canDrawOverlay) {

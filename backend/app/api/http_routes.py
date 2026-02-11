@@ -9,6 +9,8 @@ from app.core.config import settings
 from app.db.database import get_db
 from app.db.repository import create_feedback, get_recommendations, get_watchlist
 from app.models.schemas import (
+    DiscoverStockDTO,
+    DiscoverStockListResponse,
     FeedbackInput,
     NewsItemDTO,
     NewsListResponse,
@@ -82,6 +84,26 @@ async def list_latest_news(
     merged.sort(key=lambda x: str(x.get("published_at", "")), reverse=True)
     return NewsListResponse(
         items=[NewsItemDTO.model_validate(item) for item in merged[:limit]]
+    )
+
+
+@router.get("/discover/stocks", response_model=DiscoverStockListResponse)
+async def discover_stocks(
+    request: Request,
+    client_id: str = Query(...),
+    limit: int = Query(5, ge=1, le=20),
+    universe_limit: int = Query(80, ge=20, le=300),
+):
+    rec_engine = getattr(request.app.state, "rec_engine", None)
+    if rec_engine is None:
+        raise HTTPException(status_code=500, detail="recommendation engine unavailable")
+    items = await rec_engine.discover_stocks(
+        client_id=client_id,
+        limit=limit,
+        universe_limit=universe_limit,
+    )
+    return DiscoverStockListResponse(
+        items=[DiscoverStockDTO.model_validate(item) for item in items]
     )
 
 

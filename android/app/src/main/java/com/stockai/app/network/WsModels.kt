@@ -83,3 +83,22 @@ data class RecommendationStatusDto(
     @SerialName("finished_at") val finishedAt: String? = null,
     val error: String? = null,
 )
+
+@Serializable
+data class DiscoverStockDto(
+    val symbol: String,
+    val name: String,
+    val action: String,
+    val score: Double = 0.0,
+    val confidence: Double = 0.0,
+    @SerialName("summary_zh") val summaryZh: String,
+    @SerialName("summary_en") val summaryEn: String,
+    val reasons: List<String> = emptyList(),
+    @SerialName("news_count") val newsCount: Int = 0,
+    @SerialName("target_position_pct") val targetPositionPct: Double = 0.0,
+)
+
+@Serializable
+data class DiscoverStockListResponse(
+    val items: List<DiscoverStockDto>
+)

@@ -123,6 +123,35 @@ class ApiClient {
         }
     }
 
+    suspend fun fetchDiscoveredStocks(
+        baseUrl: String,
+        clientId: String,
+        limit: Int = 5,
+        universeLimit: Int = 80,
+    ): List<DiscoverStockDto> {
+        return withContext(Dispatchers.IO) {
+            val encodedClientId = URLEncoder.encode(clientId, StandardCharsets.UTF_8)
+            val url = buildString {
+                append(baseUrl.trimEnd('/'))
+                append("/v1/discover/stocks?client_id=")
+                append(encodedClientId)
+                append("&limit=")
+                append(limit)
+                append("&universe_limit=")
+                append(universeLimit)
+            }
+            val request = Request.Builder().url(url).get().build()
+            runCatching {
+                client.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) return@use emptyList()
+                    val body = response.body?.string().orEmpty()
+                    if (body.isBlank()) return@use emptyList()
+                    json.decodeFromString<DiscoverStockListResponse>(body).items
+                }
+            }.getOrDefault(emptyList())
+        }
+    }
+
     private fun buildNewsUrl(
         baseUrl: String,
         clientId: String,

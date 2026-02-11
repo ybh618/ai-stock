@@ -12,6 +12,7 @@ except Exception:  # pragma: no cover
 class MarketDataProvider(Protocol):
     def get_15m_bars(self, symbol: str, limit: int = 128) -> list[dict]: ...
     def get_daily_bars(self, symbol: str, limit: int = 120) -> list[dict]: ...
+    def discover_candidates(self, limit: int = 80) -> list[dict]: ...
 
 
 def _normalize_symbol(symbol: str) -> str:
@@ -146,6 +147,57 @@ class AkShareMarketDataProvider:
                 self.last_daily_symbol = candidate
                 return records
         return []
+
+    def discover_candidates(self, limit: int = 80) -> list[dict]:
+        if ak is None:
+            self.last_error = "akshare not available"
+            return []
+        try:
+            df = ak.stock_zh_a_spot_em()
+        except Exception as error:
+            self.last_error = str(error)
+            return []
+        if df is None or df.empty:
+            return []
+
+        items: list[dict] = []
+        for _, row in df.iterrows():
+            symbol = str(row.get("代码") or row.get("symbol") or "").strip()
+            name = str(row.get("名称") or row.get("name") or "").strip()
+            if not symbol or not name:
+                continue
+            if "ST" in name.upper():
+                continue
+            turnover = _as_float(row.get("成交额") or row.get("amount") or 0)
+            change_pct = _as_float(row.get("涨跌幅") or row.get("changepercent") or 0)
+            if turnover <= 0:
+                continue
+            activity_score = abs(change_pct) * 2.0 + min(50.0, turnover / 1_000_000_000)
+            items.append(
+                {
+                    "symbol": symbol,
+                    "name": name,
+                    "turnover": turnover,
+                    "change_pct": change_pct,
+                    "activity_score": activity_score,
+                }
+            )
+
+        items.sort(
+            key=lambda x: (
+                float(x.get("activity_score", 0)),
+                float(x.get("turnover", 0)),
+            ),
+            reverse=True,
+        )
+        return items[: max(1, limit)]
+
+
+def _as_float(value: object) -> float:
+    try:
+        return float(value or 0)
+    except Exception:
+        return 0.0
 
 
 def _aggregate_5m_to_15m(records_5m: list[dict], limit_15m: int) -> list[dict]:

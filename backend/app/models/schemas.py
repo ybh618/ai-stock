@@ -106,6 +106,23 @@ class RecommendationStatusResponse(BaseModel):
     error: str | None = None
 
 
+class DiscoverStockDTO(BaseModel):
+    symbol: str
+    name: str
+    action: str
+    score: float = 0.0
+    confidence: float = 0.0
+    summary_zh: str
+    summary_en: str
+    reasons: list[str] = Field(default_factory=list)
+    news_count: int = 0
+    target_position_pct: float = 0.0
+
+
+class DiscoverStockListResponse(BaseModel):
+    items: list[DiscoverStockDTO]
+
+
 class LlmOutput(BaseModel):
     summary_zh: str
     summary_en: str

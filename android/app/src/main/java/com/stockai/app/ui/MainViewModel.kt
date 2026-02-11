@@ -7,6 +7,7 @@ import com.stockai.app.data.AppRepository
 import com.stockai.app.data.PreferenceState
 import com.stockai.app.data.RecommendationEntity
 import com.stockai.app.data.WatchlistEntity
+import com.stockai.app.network.DiscoverStockDto
 import com.stockai.app.network.NewsItemDto
 import com.stockai.app.network.RecommendationStatusDto
 import com.stockai.app.network.WsConnectionState
@@ -37,12 +38,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 quietEndHour = 8,
                 autoStartEnabled = true,
                 floatingWindowEnabled = false,
+                discoverModeEnabled = false,
             ),
         )
 
     private val _recommendations = MutableStateFlow<List<RecommendationEntity>>(emptyList())
     private val _watchlist = MutableStateFlow<List<WatchlistEntity>>(emptyList())
     private val _news = MutableStateFlow<List<NewsItemDto>>(emptyList())
+    private val _discoveries = MutableStateFlow<List<DiscoverStockDto>>(emptyList())
     private val _newsLoading = MutableStateFlow(false)
     private val _newsActionMessage = MutableStateFlow("")
     private var aiStatusJob: Job? = null
@@ -50,6 +53,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val recommendations: StateFlow<List<RecommendationEntity>> = _recommendations.asStateFlow()
     val watchlist: StateFlow<List<WatchlistEntity>> = _watchlist.asStateFlow()
     val news: StateFlow<List<NewsItemDto>> = _news.asStateFlow()
+    val discoveries: StateFlow<List<DiscoverStockDto>> = _discoveries.asStateFlow()
     val newsLoading: StateFlow<Boolean> = _newsLoading.asStateFlow()
     val newsActionMessage: StateFlow<String> = _newsActionMessage.asStateFlow()
     val wsConnectionState: StateFlow<WsConnectionState> = repo.observeWsConnectionState()
@@ -95,6 +99,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setFloatingWindowEnabled(enabled: Boolean) {
         viewModelScope.launch { repo.setFloatingWindowEnabled(enabled) }
+    }
+
+    fun setDiscoverModeEnabled(enabled: Boolean) {
+        viewModelScope.launch { repo.setDiscoverModeEnabled(enabled) }
     }
 
     fun submitFeedback(recommendationId: Int, helpful: Boolean, reason: String?) {
@@ -158,6 +166,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             _newsActionMessage.value = initialMessage
             startAiStatusPolling()
+        }
+    }
+
+    fun discoverNewStocks() {
+        viewModelScope.launch {
+            _newsLoading.value = true
+            val items = repo.fetchDiscoveredStocks(limit = 6, universeLimit = 100)
+            _newsLoading.value = false
+            _discoveries.value = items
+            _newsActionMessage.value = if (items.isEmpty()) {
+                "discover_empty"
+            } else {
+                "discover_loaded:${items.size}"
+            }
         }
     }
 

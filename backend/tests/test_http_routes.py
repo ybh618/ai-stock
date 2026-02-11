@@ -77,6 +77,28 @@ class _StubRecommendationEngine:
             },
         )
 
+    async def discover_stocks(
+        self,
+        client_id: str,
+        limit: int = 5,
+        universe_limit: int = 80,
+    ) -> list[dict]:
+        _ = (client_id, limit, universe_limit)
+        return [
+            {
+                "symbol": "600519",
+                "name": "贵州茅台",
+                "action": "buy",
+                "score": 2.5,
+                "confidence": 0.72,
+                "summary_zh": "量价与新闻共振，值得关注。",
+                "summary_en": "Volume-price and news resonance, worth tracking.",
+                "reasons": ["buy_breakout", "buy_event"],
+                "news_count": 3,
+                "target_position_pct": 15.0,
+            }
+        ]
+
 
 def _build_test_app(rec_engine: _StubRecommendationEngine | None = None) -> FastAPI:
     app = FastAPI()
@@ -134,3 +156,17 @@ def test_recommendation_status_endpoint_returns_progress() -> None:
     assert payload["client_id"] == "client-c"
     assert payload["state"] == "running"
     assert payload["step"] == "collecting_candidates"
+
+
+def test_discover_stocks_endpoint_returns_items() -> None:
+    rec_engine = _StubRecommendationEngine()
+    app = _build_test_app(rec_engine=rec_engine)
+    with TestClient(app) as client:
+        response = client.get(
+            "/v1/discover/stocks",
+            params={"client_id": "client-d", "limit": 3, "universe_limit": 60},
+        )
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload["items"]) == 1
+    assert payload["items"][0]["symbol"] == "600519"
