@@ -241,7 +241,6 @@ class RecommendationEngine:
             status.updated_at = now
             status.finished_at = None
             status.error = None
-            status.items = []
             if total_watchlist is not None:
                 status.total_watchlist = total_watchlist
             if total_candidates is not None:
