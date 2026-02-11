@@ -16,6 +16,7 @@ from app.engine.guardrails import (
     is_cooldown_hit,
     is_reversal_allowed,
 )
+from app.engine.indicators import moving_average
 from app.engine.llm_client import LlmClient
 from app.engine.prefilter import prefilter_candidate
 from app.models.schemas import CandidateContext, LlmOutput
@@ -67,6 +68,14 @@ class DiscoverStatus:
     finished_at: str | None = None
     error: str | None = None
     items: list[dict] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class DiscoverSignal:
+    triggered: bool
+    score: float
+    reasons: list[str]
+    action_hint: str = "buy"
 
 
 class RecommendationEngine:
@@ -232,6 +241,7 @@ class RecommendationEngine:
             status.updated_at = now
             status.finished_at = None
             status.error = None
+            status.items = []
             if total_watchlist is not None:
                 status.total_watchlist = total_watchlist
             if total_candidates is not None:
@@ -424,6 +434,7 @@ class RecommendationEngine:
 
         semaphore = asyncio.Semaphore(4)
         scored_candidates: list[Candidate] = []
+        backup_candidates: list[Candidate] = []
         scored_lock = asyncio.Lock()
         processed_candidates = 0
         progress_lock = asyncio.Lock()
@@ -445,33 +456,30 @@ class RecommendationEngine:
                         timeout=8,
                     )
                     news = await asyncio.wait_for(
-                        self.news_provider.get_recent_news(symbol, name, hours=24),
+                        self.news_provider.get_recent_news(symbol, name, hours=72),
                         timeout=10,
                     )
-                    market = extract_market_features(symbol, bars_15m, bars_daily)
-                    result = prefilter_candidate(
+                    signal = self._score_discovery_signal(
                         symbol=symbol,
-                        name=name,
-                        market=market,
                         bars_15m=bars_15m,
                         bars_daily=bars_daily,
                         news_items=news,
-                        risk_profile=risk_profile,
                     )
-                    if not result.triggered:
-                        return
+                    market = extract_market_features(symbol, bars_15m, bars_daily)
+                    candidate = Candidate(
+                        symbol=symbol,
+                        name=name,
+                        score=signal.score,
+                        action_hint=signal.action_hint,
+                        reasons=signal.reasons,
+                        market=market,
+                        news_items=news,
+                    )
                     async with scored_lock:
-                        scored_candidates.append(
-                            Candidate(
-                                symbol=symbol,
-                                name=name,
-                                score=result.score,
-                                action_hint=result.action_hint,
-                                reasons=result.reasons,
-                                market=market,
-                                news_items=news,
-                            )
-                        )
+                        if signal.triggered:
+                            scored_candidates.append(candidate)
+                        elif signal.score >= 1.0:
+                            backup_candidates.append(candidate)
                 except Exception:
                     return
                 finally:
@@ -502,6 +510,9 @@ class RecommendationEngine:
             )
         except Exception:
             pass
+        if not scored_candidates and backup_candidates:
+            backup_candidates.sort(key=lambda c: c.score, reverse=True)
+            scored_candidates = backup_candidates[: max(limit * 2, limit)]
         scored_candidates.sort(key=lambda c: c.score, reverse=True)
         shortlist = scored_candidates[: max(limit * 2, limit)]
         if not shortlist:
@@ -574,6 +585,88 @@ class RecommendationEngine:
                 total_candidates=scan_limit,
             )
         return output
+
+    def _score_discovery_signal(
+        self,
+        symbol: str,
+        bars_15m: list[dict],
+        bars_daily: list[dict],
+        news_items: list[dict],
+    ) -> DiscoverSignal:
+        closes_daily = [float(item.get("close", 0.0) or 0.0) for item in bars_daily]
+        turnover_daily = [
+            float(item.get("turnover", 0.0) or 0.0) for item in bars_daily
+        ]
+        volume_15m = [float(item.get("volume", 0.0) or 0.0) for item in bars_15m]
+
+        if len(closes_daily) < 12 or len(volume_15m) < 24:
+            return DiscoverSignal(False, 0.0, ["insufficient_data"], "hold")
+
+        ma7 = moving_average(closes_daily, 7)[-1]
+        ma20 = moving_average(closes_daily, 20)[-1]
+        last_close = closes_daily[-1]
+        base_close = closes_daily[-8] if len(closes_daily) >= 8 else closes_daily[0]
+        momentum_7d = (
+            ((last_close - base_close) / base_close) if base_close > 0 else 0.0
+        )
+        recent_high_7 = max(closes_daily[-7:])
+
+        vol_base_window = (
+            volume_15m[-24:-4] if len(volume_15m) > 24 else volume_15m[:-4]
+        )
+        vol_base = (
+            (sum(vol_base_window) / max(1, len(vol_base_window)))
+            if vol_base_window
+            else 0.0
+        )
+        vol_ratio = (volume_15m[-1] / vol_base) if vol_base > 0 else 0.0
+        turnover_7d_avg = sum(turnover_daily[-7:]) / max(1, len(turnover_daily[-7:]))
+
+        positive_news = sum(
+            1 for item in news_items if item.get("sentiment_hint") == "positive"
+        )
+        negative_news = sum(
+            1 for item in news_items if item.get("sentiment_hint") == "negative"
+        )
+
+        reasons: list[str] = []
+        score = 0.0
+
+        if last_close >= ma7:
+            score += 1.1
+            reasons.append("above_ma7")
+        if ma7 >= ma20:
+            score += 0.9
+            reasons.append("ma7_over_ma20")
+        if momentum_7d >= 0.015:
+            score += 0.8
+            reasons.append("momentum_7d")
+        if last_close >= recent_high_7 * 0.995:
+            score += 0.8
+            reasons.append("near_7d_high")
+        if vol_ratio >= 1.15:
+            score += 0.6
+            reasons.append("volume_expansion")
+        if turnover_7d_avg >= 30_000_000:
+            score += 0.4
+            reasons.append("turnover_ok")
+        elif turnover_7d_avg < 10_000_000:
+            score -= 0.7
+            reasons.append("low_liquidity")
+        if positive_news > negative_news:
+            score += 0.4
+            reasons.append("positive_news_bias")
+        elif negative_news > positive_news:
+            score -= 0.3
+            reasons.append("negative_news_bias")
+
+        triggered = score >= 1.8 and "low_liquidity" not in reasons
+        action_hint = "buy" if score >= 0 else "hold"
+        if not reasons:
+            reasons = [f"symbol:{symbol}", "weak_signal"]
+        return DiscoverSignal(
+            triggered=triggered, score=score, reasons=reasons, action_hint=action_hint
+        )
 
     async def scan_all_clients(self, db: Session) -> None:
         client_ids = repository.get_all_client_ids(db)
